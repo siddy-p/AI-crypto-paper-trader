@@ -226,12 +226,17 @@
                 <div>
                     <h3 class="text-sm font-semibold text-gray-300 mb-4">Diagnostic Control Panel</h3>
                     <p class="text-xs text-gray-400 leading-relaxed mb-4">
-                        Click the button below to force-trigger a simulated BUY order on **BTCUSDT** to test your dashboard updates, database persistence, and stop-loss/take-profit exit tracking.
+                        Perform diagnostic commands on the live system. Trigger a simulated trade or inspect raw SQLite tables directly.
                     </p>
                 </div>
-                <button id="btn-trigger-trade" onclick="triggerTestTrade()" class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 font-semibold text-white shadow-lg shadow-indigo-500/20 active:translate-y-0.5 hover:shadow-indigo-500/35 transition-all text-sm">
-                    <i class="fas fa-play mr-1.5"></i> Trigger Test Trade
-                </button>
+                <div class="flex flex-col gap-3 mt-4">
+                    <button id="btn-trigger-trade" onclick="triggerTestTrade()" class="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 font-semibold text-white shadow-lg shadow-indigo-500/20 active:translate-y-0.5 hover:shadow-indigo-500/35 transition-all text-sm">
+                        <i class="fas fa-play mr-1.5"></i> Trigger Test Trade
+                    </button>
+                    <button onclick="openDbInspector()" class="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-gray-800 font-semibold text-gray-300 active:translate-y-0.5 transition-all text-sm">
+                        <i class="fas fa-database mr-1.5"></i> Inspect Raw Database
+                    </button>
+                </div>
             </div>
         </section>
 
@@ -524,6 +529,116 @@
             setInterval(fetchStatus, 5000);
             setInterval(updateChart, 60000);
         });
+
+        // Database Inspector State
+        let dbInspectData = null;
+        let activeDbTab = 'trades';
+
+        async function openDbInspector() {
+            document.getElementById('db-inspector-modal').classList.remove('hidden');
+            document.getElementById('db-inspector-modal').classList.add('flex');
+            await refreshDbInspector();
+        }
+
+        function closeDbInspector() {
+            document.getElementById('db-inspector-modal').classList.add('hidden');
+            document.getElementById('db-inspector-modal').classList.remove('flex');
+        }
+
+        async function refreshDbInspector() {
+            const output = document.getElementById('db-raw-output');
+            output.innerText = "// Querying SQLite database records...";
+            try {
+                const response = await fetch('/api/db_inspect');
+                const data = await response.json();
+                if (data.success) {
+                    dbInspectData = data;
+                    renderActiveDbTab();
+                } else {
+                    output.innerText = "Error querying database: " + data.error;
+                }
+            } catch (error) {
+                console.error("Error inspecting database:", error);
+                output.innerText = "Connection failed. Please check if your backend is online.";
+            }
+        }
+
+        function switchDbTab(tab) {
+            activeDbTab = tab;
+            const tabs = {
+                'trades': 'tab-btn-trades',
+                'candles': 'tab-btn-candles',
+                'history': 'tab-btn-history'
+            };
+            for (const [key, id] of Object.entries(tabs)) {
+                const btn = document.getElementById(id);
+                if (key === tab) {
+                    btn.className = "px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/30";
+                } else {
+                    btn.className = "px-4 py-2 text-xs font-semibold rounded-lg bg-slate-900/60 text-gray-400 hover:text-white border border-gray-800/60";
+                }
+            }
+            renderActiveDbTab();
+        }
+
+        function renderActiveDbTab() {
+            if (!dbInspectData) return;
+            const output = document.getElementById('db-raw-output');
+            let dataToShow = [];
+            if (activeDbTab === 'trades') {
+                dataToShow = dbInspectData.trades;
+            } else if (activeDbTab === 'candles') {
+                dataToShow = dbInspectData.candles;
+            } else if (activeDbTab === 'history') {
+                dataToShow = dbInspectData.portfolio_history;
+            }
+            
+            if (dataToShow.length === 0) {
+                output.innerText = `// No records found in '${activeDbTab}' table.`;
+            } else {
+                output.innerText = JSON.stringify(dataToShow, null, 2);
+            }
+        }
     </script>
+
+    <!-- Database Inspector Modal Overlay -->
+    <div id="db-inspector-modal" class="fixed inset-0 bg-[#020617]/85 backdrop-blur-sm items-center justify-center z-[100] hidden">
+        <div class="glass-card w-[90%] max-w-4xl max-h-[85vh] flex flex-col p-6 shadow-2xl border border-indigo-500/25">
+            <div class="flex items-center justify-between border-b border-gray-800 pb-4 mb-4">
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-database text-indigo-400 text-lg"></i>
+                    <h3 class="text-lg font-bold text-white">SQLite Database Inspector</h3>
+                </div>
+                <button onclick="closeDbInspector()" class="text-gray-500 hover:text-white transition-colors text-lg">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <!-- Tabs -->
+            <div class="flex gap-2 border-b border-gray-800/60 pb-3 mb-4">
+                <button id="tab-btn-trades" onclick="switchDbTab('trades')" class="px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
+                    trades
+                </button>
+                <button id="tab-btn-candles" onclick="switchDbTab('candles')" class="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-900/60 text-gray-400 hover:text-white border border-gray-800/60">
+                    candles (last 10)
+                </button>
+                <button id="tab-btn-history" onclick="switchDbTab('history')" class="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-900/60 text-gray-400 hover:text-white border border-gray-800/60">
+                    portfolio_history
+                </button>
+            </div>
+            
+            <!-- Content Area -->
+            <div class="flex-1 overflow-y-auto min-h-[300px] max-h-[50vh]">
+                <pre id="db-raw-output" class="text-[11px] font-mono bg-slate-950 p-4 rounded-xl overflow-x-auto text-indigo-300 border border-slate-900 leading-relaxed"></pre>
+            </div>
+            
+            <div class="flex items-center justify-between border-t border-gray-800 pt-4 mt-4">
+                <span class="text-xs text-gray-500">Querying live from <code>trading_system.db</code></span>
+                <button onclick="refreshDbInspector()" class="px-4 py-2 text-xs font-semibold bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg transition-colors">
+                    <i class="fas fa-sync mr-1"></i> Refresh Query
+                </button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

@@ -1,5 +1,6 @@
 import logging
 import datetime
+import sqlite3
 from flask import Flask, jsonify, render_template
 from src import config
 from src import database
@@ -143,6 +144,33 @@ def create_app(trader_bot):
             logger.error(f"Error serving portfolio history API: {e}")
             return jsonify([])
 
+    @app.route("/api/db_inspect")
+    def api_db_inspect():
+        try:
+            conn = database.get_db_connection()
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT * FROM candles ORDER BY id DESC LIMIT 10")
+            candles = [dict(row) for row in cursor.fetchall()]
+            
+            cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 20")
+            trades = [dict(row) for row in cursor.fetchall()]
+            
+            cursor.execute("SELECT * FROM portfolio_history ORDER BY id DESC LIMIT 20")
+            history = [dict(row) for row in cursor.fetchall()]
+            
+            conn.close()
+            return jsonify({
+                "success": True,
+                "candles": candles,
+                "trades": trades,
+                "portfolio_history": history
+            })
+        except Exception as e:
+            logger.error(f"Error executing db_inspect: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+     
     return app
 
 def run_dashboard(app, host=config.DASHBOARD_HOST, port=config.DASHBOARD_PORT):

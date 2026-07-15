@@ -151,7 +151,7 @@ def create_app(trader_bot):
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            cursor.execute("SELECT * FROM candles ORDER BY id DESC LIMIT 10")
+            cursor.execute("SELECT * FROM candles ORDER BY open_time DESC LIMIT 10")
             candles = [dict(row) for row in cursor.fetchall()]
             
             cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 20")

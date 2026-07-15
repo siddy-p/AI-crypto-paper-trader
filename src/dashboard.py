@@ -171,17 +171,29 @@ def create_app(trader_bot):
     def api_db_inspect():
         try:
             conn = database.get_db_connection()
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            cursor.execute("SELECT * FROM candles ORDER BY open_time DESC LIMIT 10")
-            candles = [dict(row) for row in cursor.fetchall()]
-            
-            cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 20")
-            trades = [dict(row) for row in cursor.fetchall()]
-            
-            cursor.execute("SELECT * FROM portfolio_history ORDER BY id DESC LIMIT 20")
-            history = [dict(row) for row in cursor.fetchall()]
+            if database.DB_TYPE == "postgres":
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                
+                cursor.execute("SELECT * FROM candles ORDER BY open_time DESC LIMIT 10")
+                candles = [dict(row) for row in cursor.fetchall()]
+                
+                cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 20")
+                trades = [dict(row) for row in cursor.fetchall()]
+                
+                cursor.execute("SELECT * FROM portfolio_history ORDER BY id DESC LIMIT 20")
+                history = [dict(row) for row in cursor.fetchall()]
+            else:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                cursor.execute("SELECT * FROM candles ORDER BY open_time DESC LIMIT 10")
+                candles = [dict(row) for row in cursor.fetchall()]
+                
+                cursor.execute("SELECT * FROM trades ORDER BY id DESC LIMIT 20")
+                trades = [dict(row) for row in cursor.fetchall()]
+                
+                cursor.execute("SELECT * FROM portfolio_history ORDER BY id DESC LIMIT 20")
+                history = [dict(row) for row in cursor.fetchall()]
             
             conn.close()
             return jsonify({

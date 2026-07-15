@@ -191,36 +191,108 @@ class Trader:
             # Check if we need to retrain daily
             self.check_daily_retrain()
 
-    def execute_strategy(self, symbol):
-        """Runs indicator calculations, queries the model, and executes trading actions."""
+    def evaluate_strategy(self, symbol):
+        """Runs indicator calculations, queries the models, and executes trading actions."""
         # 1. Build DataFrame
         with self.lock:
             candles = list(self.buffers.get(symbol, []))
             
         if len(candles) < 60:
-            # Insufficient buffer to calculate indicators reliably
             return
 
         df = pd.DataFrame(candles)
         df = calculate_all_indicators(df)
         
-        # 2. Query model prediction
-        prob = self.model_manager.predict_probability(df)
-        confidence = prob * 100.0
+        # 2. Query model predictions (both Long and Short probabilities)
+        prob_long, prob_short = self.model_manager.predict_probabilities(df)
+        confidence_long = prob_long * 100.0
+        confidence_short = prob_short * 100.0
         
-        logger.debug(f"Strategy evaluate for {symbol} - Close: {df['close'].iloc[-1]}, Model Confidence: {confidence:.2f}%")
+        logger.debug(f"Strategy evaluate for {symbol} - Close: {df['close'].iloc[-1]}, Long: {confidence_long:.2f}%, Short: {confidence_short:.2f}%")
         
-        # Store latest confidence score in memory (can be queried by the dashboard)
         df_latest_close = df["close"].iloc[-1]
         
-        # 3. Check for BUY Signal
-        # Executed if confidence exceeds 75% and we don't already have an open position for this symbol
-        if confidence > self.confidence_threshold:
-            open_trades = database.get_open_trades()
-            already_holding = any(t["symbol"] == symbol for t in open_trades)
+        # 3. Check for Signals with Confluence Filters (Logical Trend & Momentum Verification)
+        open_trades = database.get_open_trades()
+        already_holding = any(t["symbol"] == symbol for t in open_trades)
+        
+        if not already_holding:
+            # Extract indicator fields to verify signal confluence
+            ema20 = df["ema_20"].iloc[-1]
+            ema50 = df["ema_50"].iloc[-1]
+            macd_hist = df["macd_hist"].iloc[-1]
+            macd_hist_prev = df["macd_hist"].iloc[-2] if len(df) > 1 else macd_hist
+            atr = df["atr_14"].iloc[-1]
             
-            if not already_holding:
-                self.open_long_position(symbol, df_latest_close, confidence)
+            # Volatility threshold check: Average True Range (ATR) must be at least 0.015% of the close price
+            # to guarantee trade execution feasibility and avoid flat consolidations.
+            volatility_ok = atr >= (df_latest_close * 0.00015)
+            
+            if volatility_ok:
+                if confidence_long > self.confidence_threshold and confidence_long >= confidence_short:
+                    # LOGICAL CONFLUENCE LONG:
+                    # 1. Price is in an uptrend (Close > EMA20 and EMA20 > EMA50)
+                    # 2. Momentum is expanding upward (MACD histogram is rising)
+                    trend_ok = df_latest_close > ema20 and ema20 >= ema50
+                    momentum_ok = macd_hist > macd_hist_prev
+                    
+                    if trend_ok and momentum_ok:
+                        self.open_long_position(symbol, df_latest_close, confidence_long)
+                    else:
+                        logger.debug(f"Long signal for {symbol} filtered by confluence logic: Trend={trend_ok}, Momentum={momentum_ok}")
+                elif confidence_short > self.confidence_threshold and confidence_short > confidence_long:
+                    # LOGICAL CONFLUENCE SHORT:
+                    # 1. Price is in a downtrend (Close < EMA20 and EMA20 < EMA50)
+                    # 2. Momentum is expanding downward (MACD histogram is falling)
+                    trend_ok = df_latest_close < ema20 and ema20 <= ema50
+                    momentum_ok = macd_hist < macd_hist_prev
+                    
+                    if trend_ok and momentum_ok:
+                        self.open_short_position(symbol, df_latest_close, confidence_short)
+                    else:
+                        logger.debug(f"Short signal for {symbol} filtered by confluence logic: Trend={trend_ok}, Momentum={momentum_ok}")
+            else:
+                logger.debug(f"Signal for {symbol} ignored due to low volatility threshold check.")
+
+    def open_short_position(self, symbol, entry_price, confidence):
+        """Calculates size, executes Short SELL order, and logs position."""
+        portfolio_val = self.get_portfolio_value()
+        available_usdt = self.get_available_usdt()
+        
+        # Position sizing
+        usdt_position_size = portfolio_val * self.risk_pct / self.stop_loss_pct
+        usdt_to_spend = min(usdt_position_size, available_usdt * 0.98)
+        
+        if usdt_to_spend < 10.0:
+            logger.warning(f"Position size {usdt_to_spend:.2f} USDT is below minimum. Skipping short order for {symbol}.")
+            return
+            
+        qty = usdt_to_spend / entry_price
+        
+        # For Short trades: Stop Loss is ABOVE entry price, Take Profit is BELOW entry price
+        stop_loss = entry_price * (1.0 + self.stop_loss_pct)
+        take_profit = entry_price * (1.0 - self.take_profit_pct)
+        
+        logger.info(f"★★★ SELL (SHORT) SIGNAL for {symbol}! Confidence: {confidence:.2f}%. Size: {usdt_to_spend:.2f} USDT, Price: {entry_price}")
+        
+        if config.DISABLE_ORDER_EXECUTION:
+            # Simulated short execution
+            with self.lock:
+                self.simulated_usdt -= usdt_to_spend
+                
+            database.add_trade(
+                symbol=symbol,
+                side="SELL",
+                entry_price=entry_price,
+                quantity=qty,
+                confidence=confidence,
+                stop_loss=stop_loss,
+                take_profit=take_profit
+            )
+            logger.info(f"Simulated Short position logged: sold {qty:.6f} {symbol} at {entry_price:.6f}")
+        else:
+            # Live Spot Testnet doesn't support short selling!
+            logger.warning(f"Short selling (downtrades) is not supported on live Spot markets. Skipping order for {symbol}.")
 
     def open_long_position(self, symbol, entry_price, confidence):
         """Calculates size, executes BUY order, and logs position in SQLite."""
@@ -302,30 +374,45 @@ class Trader:
             entry_price = trade["entry_price"]
             stop_loss = trade["stop_loss"]
             take_profit = trade["take_profit"]
+            side = trade.get("side", "BUY")
             
-            # Check Stop Loss (<= 1%)
-            if current_price <= stop_loss:
-                pnl = (current_price - entry_price) * qty
-                logger.info(f"▲ STOP LOSS HIT for {symbol} at {current_price} (Entry: {entry_price}, P&L: {pnl:.4f} USDT)")
-                self.close_position(trade_id, symbol, qty, entry_price, current_price, pnl, "STOP_LOSS")
-                
-            # Check Take Profit (>= 2%)
-            elif current_price >= take_profit:
-                pnl = (current_price - entry_price) * qty
-                logger.info(f"▼ TAKE PROFIT HIT for {symbol} at {current_price} (Entry: {entry_price}, P&L: {pnl:.4f} USDT)")
-                self.close_position(trade_id, symbol, qty, entry_price, current_price, pnl, "TAKE_PROFIT")
+            if side == "SELL":
+                # Short exits: SL is above entry, TP is below entry
+                if current_price >= stop_loss:
+                    pnl = (entry_price - current_price) * qty
+                    logger.info(f"▲ SHORT STOP LOSS HIT for {symbol} at {current_price} (Entry: {entry_price}, P&L: {pnl:.4f} USDT)")
+                    self.close_position(trade_id, symbol, qty, entry_price, current_price, pnl, "STOP_LOSS", side)
+                elif current_price <= take_profit:
+                    pnl = (entry_price - current_price) * qty
+                    logger.info(f"▼ SHORT TAKE PROFIT HIT for {symbol} at {current_price} (Entry: {entry_price}, P&L: {pnl:.4f} USDT)")
+                    self.close_position(trade_id, symbol, qty, entry_price, current_price, pnl, "TAKE_PROFIT", side)
+            else:
+                # Long exits: SL is below entry, TP is above entry
+                if current_price <= stop_loss:
+                    pnl = (current_price - entry_price) * qty
+                    logger.info(f"▲ LONG STOP LOSS HIT for {symbol} at {current_price} (Entry: {entry_price}, P&L: {pnl:.4f} USDT)")
+                    self.close_position(trade_id, symbol, qty, entry_price, current_price, pnl, "STOP_LOSS", side)
+                elif current_price >= take_profit:
+                    pnl = (current_price - entry_price) * qty
+                    logger.info(f"▼ LONG TAKE PROFIT HIT for {symbol} at {current_price} (Entry: {entry_price}, P&L: {pnl:.4f} USDT)")
+                    self.close_position(trade_id, symbol, qty, entry_price, current_price, pnl, "TAKE_PROFIT", side)
 
-    def close_position(self, trade_id, symbol, quantity, entry_price, exit_price, pnl, reason):
+    def close_position(self, trade_id, symbol, quantity, entry_price, exit_price, pnl, reason, side="BUY"):
         """Closes a position, places a market SELL order on Binance (or simulates), and logs the result."""
         if config.DISABLE_ORDER_EXECUTION:
             # Simulated sell
             with self.lock:
-                self.simulated_usdt += quantity * exit_price
-                
+                if side == "SELL":
+                    # Short P&L return: entry_value + P&L = qty * (2 * entry_price - exit_price)
+                    self.simulated_usdt += quantity * (2 * entry_price - exit_price)
+                else:
+                    # Long P&L return: quantity * exit_price
+                    self.simulated_usdt += quantity * exit_price
+                    
             database.close_trade(trade_id, exit_price, pnl, reason)
-            logger.info(f"Simulated position closed: sold {quantity:.6f} {symbol} at {exit_price:.6f} (P&L: {pnl:.4f})")
+            logger.info(f"Simulated {side} position closed: exit price {exit_price:.6f} (P&L: {pnl:.4f})")
         else:
-            # Real Binance Testnet Spot execution
+            # Live Spot Testnet doesn't support short trades, so this is always a Long close (market SELL order)
             order_result = self.client.place_market_sell(symbol, quantity)
             if order_result:
                 fills = order_result.get("fills", [])
@@ -389,8 +476,8 @@ class Trader:
         for symbol in self.symbols:
             latest_price = self.latest_prices.get(symbol, 0.0)
             
-            # Check what confidence score the model predicts right now
             confidence = 50.0
+            side = "BUY"
             volume_change = 0.0
             atr = 0.0
             
@@ -400,8 +487,16 @@ class Trader:
             if len(candles) >= 60:
                 df = pd.DataFrame(candles)
                 df = calculate_all_indicators(df)
-                prob = self.model_manager.predict_probability(df)
-                confidence = prob * 100.0
+                prob_long, prob_short = self.model_manager.predict_probabilities(df)
+                
+                # Take whichever side has the higher confidence prediction
+                if prob_long >= prob_short:
+                    confidence = prob_long * 100.0
+                    side = "BUY"
+                else:
+                    confidence = prob_short * 100.0
+                    side = "SELL"
+                    
                 volume_change = df["volume_change_pct"].iloc[-1]
                 atr = df["atr_14"].iloc[-1]
                 
@@ -410,7 +505,8 @@ class Trader:
                 "price": round(latest_price, 6) if latest_price > 0 else "N/A",
                 "volume_change": round(volume_change, 2),
                 "atr": round(atr, 6),
-                "confidence": round(confidence, 1)
+                "confidence": round(confidence, 1),
+                "side": side
             })
             
         return results

@@ -31,13 +31,20 @@ def create_app(trader_bot):
             for pos in open_positions:
                 symbol = pos["symbol"]
                 current_price = trader_bot.latest_prices.get(symbol, pos["entry_price"])
-                unrealized_pnl = (current_price - pos["entry_price"]) * pos["quantity"]
-                pnl_pct = ((current_price - pos["entry_price"]) / pos["entry_price"]) * 100.0
+                
+                # Check position side for correct P&L direction
+                side = pos.get("side", "BUY")
+                if side == "SELL":
+                    unrealized_pnl = (pos["entry_price"] - current_price) * pos["quantity"]
+                    pnl_pct = ((pos["entry_price"] - current_price) / pos["entry_price"]) * 100.0
+                else:
+                    unrealized_pnl = (current_price - pos["entry_price"]) * pos["quantity"]
+                    pnl_pct = ((current_price - pos["entry_price"]) / pos["entry_price"]) * 100.0
                 
                 enriched_positions.append({
                     "id": pos["id"],
                     "symbol": symbol,
-                    "side": pos["side"],
+                    "side": side,
                     "entry_price": pos["entry_price"],
                     "current_price": current_price,
                     "quantity": pos["quantity"],
@@ -89,12 +96,28 @@ def create_app(trader_bot):
             open_trades = database.get_open_trades()
             if any(t["symbol"] == symbol for t in open_trades):
                 return jsonify({"success": False, "error": f"Already holding an open position for {symbol}."})
-                
+            
+            # Alternate sides based on total database trade rows
+            conn = database.get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM trades")
+            count = cursor.fetchone()[0]
+            conn.close()
+            
+            side = "SELL" if count % 2 == 1 else "BUY"
+            
             # Use a $10 position size for this test order
             usdt_size = 10.0
             qty = usdt_size / latest_price
-            stop_loss = latest_price * 0.99
-            take_profit = latest_price * 1.02
+            
+            if side == "SELL":
+                # For Short: Stop loss is above, take profit is below
+                stop_loss = latest_price * 1.01
+                take_profit = latest_price * 0.98
+            else:
+                # For Long: Stop loss is below, take profit is above
+                stop_loss = latest_price * 0.99
+                take_profit = latest_price * 1.02
             
             # Force simulated balance execution
             with trader_bot.lock:
@@ -102,7 +125,7 @@ def create_app(trader_bot):
                 
             database.add_trade(
                 symbol=symbol,
-                side="BUY",
+                side=side,
                 entry_price=latest_price,
                 quantity=qty,
                 confidence=85.0,
@@ -115,8 +138,8 @@ def create_app(trader_bot):
             available_cash = trader_bot.get_available_usdt()
             database.log_portfolio(portfolio_val, available_cash)
             
-            logger.info(f"Triggered manual test trade on {symbol} at price ${latest_price:.2f}")
-            return jsonify({"success": True, "message": f"Successfully forced a test BUY on {symbol} at ${latest_price:.2f}!"})
+            logger.info(f"Triggered manual test trade on {symbol} ({side}) at price ${latest_price:.2f}")
+            return jsonify({"success": True, "message": f"Successfully forced a test {side} on {symbol} at ${latest_price:.2f}!"})
         except Exception as e:
             logger.error(f"Failed to open manual test trade: {e}")
             return jsonify({"success": False, "error": str(e)}), 500

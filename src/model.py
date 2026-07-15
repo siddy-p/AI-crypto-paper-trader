@@ -12,10 +12,14 @@ logger = logging.getLogger(__name__)
 
 class CryptoModelManager:
     def __init__(self):
-        self.model_path = config.MODEL_PATH
-        self.model = None
+        self.model_path_base = config.MODEL_PATH
+        self.model_path_long = self.model_path_base.replace(".json", "_long.json")
+        self.model_path_short = self.model_path_base.replace(".json", "_short.json")
         
-        # Define the feature list expected by the model
+        self.model_long = None
+        self.model_short = None
+        
+        # Define the feature list expected by the models
         self.feature_cols = [
             'feat_close_to_ema20',
             'feat_close_to_ema50',
@@ -33,38 +37,83 @@ class CryptoModelManager:
             'feat_momentum_30'
         ]
         
-        # Load model if it exists
+        # Load models if they exist
         self.load_model()
 
+    # Legacy compatibility property for test suites expecting .model
+    @property
+    def model(self):
+        return self.model_long
+
+    @model.setter
+    def model(self, value):
+        self.model_long = value
+
     def load_model(self):
-        """Loads the saved XGBoost model weights if they exist."""
-        if os.path.exists(self.model_path):
+        """Loads the saved XGBoost models if they exist."""
+        # 1. Load Long model
+        if os.path.exists(self.model_path_long):
             try:
-                self.model = xgb.XGBClassifier()
-                self.model.load_model(self.model_path)
-                logger.info(f"Loaded existing model from {self.model_path}")
+                self.model_long = xgb.XGBClassifier()
+                self.model_long.load_model(self.model_path_long)
+                logger.info(f"Loaded existing Long model from {self.model_path_long}")
             except Exception as e:
-                logger.error(f"Failed to load model from {self.model_path}: {e}")
-                self.model = None
+                logger.error(f"Failed to load Long model: {e}")
+                self.model_long = None
+        elif os.path.exists(self.model_path_base):
+            # Fallback to base model path if legacy file exists
+            try:
+                self.model_long = xgb.XGBClassifier()
+                self.model_long.load_model(self.model_path_base)
+                logger.info(f"Loaded existing legacy model from {self.model_path_base}")
+            except Exception as e:
+                logger.error(f"Failed to load legacy model: {e}")
+                self.model_long = None
         else:
-            logger.info("No existing model found. Will need to train on startup.")
+            logger.info("No existing Long model found. Will train on startup.")
+            
+        # 2. Load Short model
+        if os.path.exists(self.model_path_short):
+            try:
+                self.model_short = xgb.XGBClassifier()
+                self.model_short.load_model(self.model_path_short)
+                logger.info(f"Loaded existing Short model from {self.model_path_short}")
+            except Exception as e:
+                logger.error(f"Failed to load Short model: {e}")
+                self.model_short = None
+        else:
+            logger.info("No existing Short model found. Will train on startup.")
 
     def save_model(self):
-        """Saves the current model weights to disk."""
-        if self.model:
+        """Saves current models to disk."""
+        if self.model_long:
             try:
-                self.model.save_model(self.model_path)
-                logger.info(f"Saved model to {self.model_path}")
+                self.model_long.save_model(self.model_path_long)
+                self.model_long.save_model(self.model_path_base)
+                logger.info(f"Saved Long model to {self.model_path_long} and legacy base path {self.model_path_base}")
             except Exception as e:
-                logger.error(f"Failed to save model to {self.model_path}: {e}")
+                logger.error(f"Failed to save Long model: {e}")
+                
+        if self.model_short:
+            try:
+                self.model_short.save_model(self.model_path_short)
+                logger.info(f"Saved Short model to {self.model_path_short}")
+            except Exception as e:
+                logger.error(f"Failed to save Short model: {e}")
 
+    # Legacy method signature returning just X and y_long to pass standard unit tests
     def prepare_training_data(self, symbols):
+        X, y_long, _ = self.prepare_training_data_dual(symbols)
+        return X, y_long
+
+    def prepare_training_data_dual(self, symbols):
         """
-        Loads all cached candles, computes indicators, generates features,
-        labels targets, and aggregates them into a single training dataframe.
+        Loads all cached candles, computes indicators, labels target classes,
+        and aggregates them into training datasets.
         """
         all_features = []
-        all_targets = []
+        all_targets_long = []
+        all_targets_short = []
         
         logger.info(f"Preparing training data for {len(symbols)} symbols...")
         
@@ -78,51 +127,55 @@ class CryptoModelManager:
             df = pd.DataFrame(candles)
             df = calculate_all_indicators(df)
             
-            # 1. Generate labels: 1 if high price increases by >= 0.5% in the next 15 minutes, else 0
-            # Next 15 minutes = index t+1 to t+15
+            # Label Long: 1 if high increases by >= 0.5% in the next 15 minutes, else 0
             high_shifted = [df['high'].shift(-h) for h in range(1, 16)]
             future_max_high = pd.concat(high_shifted, axis=1).max(axis=1)
+            df['target_long'] = (future_max_high >= (df['close'] * 1.005)).astype(int)
             
-            # Target is 1 if future max high >= close * 1.005 (0.5% gain)
-            df['target'] = (future_max_high >= (df['close'] * 1.005)).astype(int)
+            # Label Short: 1 if low drops by >= 0.5% in the next 15 minutes, else 0
+            low_shifted = [df['low'].shift(-h) for h in range(1, 16)]
+            future_min_low = pd.concat(low_shifted, axis=1).min(axis=1)
+            df['target_short'] = (future_min_low <= (df['close'] * 0.995)).astype(int)
             
             # Generate normalized features
             feats = generate_normalized_features(df)
             
-            # Drop rows with NaNs (first 50 due to indicators, last 15 due to lookahead target)
-            feats['target'] = df['target']
+            # Append targets to clean alignment
+            feats['target_long'] = df['target_long']
+            feats['target_short'] = df['target_short']
             clean_df = feats.dropna()
             
             if len(clean_df) > 0:
                 all_features.append(clean_df[self.feature_cols])
-                all_targets.append(clean_df['target'])
+                all_targets_long.append(clean_df['target_long'])
+                all_targets_short.append(clean_df['target_short'])
                 
         if not all_features:
             logger.error("No training data could be prepared.")
-            return None, None
+            return None, None, None
             
         X = pd.concat(all_features, axis=0)
-        y = pd.concat(all_targets, axis=0)
+        y_long = pd.concat(all_targets_long, axis=0)
+        y_short = pd.concat(all_targets_short, axis=0)
         
-        logger.info(f"Training data ready. Total samples: {len(X)} (Positive class: {sum(y)} - {round(sum(y)/len(y)*100, 2)}%)")
-        return X, y
+        logger.info(f"Training data ready. Total samples: {len(X)}")
+        logger.info(f"  Long Positives: {sum(y_long)} ({round(sum(y_long)/len(y_long)*100, 1)}%)")
+        logger.info(f"  Short Positives: {sum(y_short)} ({round(sum(y_short)/len(y_short)*100, 1)}%)")
+        
+        return X, y_long, y_short
 
     def train(self, symbols):
-        """
-        Trains the XGBoost model on all available historical data
-        and saves it.
-        """
-        X, y = self.prepare_training_data(symbols)
+        """Trains both Long and Short classifiers on historical data."""
+        X, y_long, y_short = self.prepare_training_data_dual(symbols)
         if X is None or len(X) < 200:
-            logger.error("Not enough historical data to train the model. Minimum 200 samples required.")
+            logger.error("Not enough historical data to train the models. Minimum 200 samples required.")
             return False
             
         try:
-            logger.info("Training XGBoost Classifier...")
-            X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
-            
-            # Setup XGBoost classifier
-            self.model = xgb.XGBClassifier(
+            # 1. Train Long Model
+            logger.info("Training Long model classifier...")
+            X_train_l, X_val_l, y_train_l, y_val_l = train_test_split(X, y_long, test_size=0.2, random_state=42)
+            self.model_long = xgb.XGBClassifier(
                 n_estimators=300,
                 max_depth=5,
                 learning_rate=0.05,
@@ -132,18 +185,28 @@ class CryptoModelManager:
                 eval_metric="logloss",
                 early_stopping_rounds=30
             )
+            self.model_long.fit(X_train_l, y_train_l, eval_set=[(X_val_l, y_val_l)], verbose=False)
+            val_preds_l = self.model_long.predict(X_val_l)
+            acc_l = (val_preds_l == y_val_l).mean()
+            logger.info(f"Long model complete. Validation Accuracy: {round(acc_l * 100, 2)}%")
             
-            self.model.fit(
-                X_train, y_train,
-                eval_set=[(X_val, y_val)],
-                verbose=False
+            # 2. Train Short Model
+            logger.info("Training Short model classifier...")
+            X_train_s, X_val_s, y_train_s, y_val_s = train_test_split(X, y_short, test_size=0.2, random_state=42)
+            self.model_short = xgb.XGBClassifier(
+                n_estimators=300,
+                max_depth=5,
+                learning_rate=0.05,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=42,
+                eval_metric="logloss",
+                early_stopping_rounds=30
             )
-            
-            # Evaluate performance on validation set
-            val_preds = self.model.predict(X_val)
-            val_probs = self.model.predict_proba(X_val)[:, 1]
-            accuracy = (val_preds == y_val).mean()
-            logger.info(f"Model training complete. Validation Accuracy: {round(accuracy * 100, 2)}%")
+            self.model_short.fit(X_train_s, y_train_s, eval_set=[(X_val_s, y_val_s)], verbose=False)
+            val_preds_s = self.model_short.predict(X_val_s)
+            acc_s = (val_preds_s == y_val_s).mean()
+            logger.info(f"Short model complete. Validation Accuracy: {round(acc_s * 100, 2)}%")
             
             self.save_model()
             return True
@@ -151,28 +214,33 @@ class CryptoModelManager:
             logger.error(f"Error during model training: {e}")
             return False
 
+    # Legacy method signature returning just Long probability to pass standard unit tests
     def predict_probability(self, df):
+        prob_long, _ = self.predict_probabilities(df)
+        return prob_long
+
+    def predict_probabilities(self, df):
         """
-        Generates the prediction probability for a single symbol state.
-        Expects a DataFrame with the latest closed candle and its indicators calculated.
+        Generates prediction probabilities for both directions.
+        Returns: (prob_long, prob_short)
         """
-        if self.model is None:
-            logger.warning("No model loaded. Predicting default neutral probability (0.5).")
-            return 0.5
-            
+        prob_long = 0.5
+        prob_short = 0.5
+        
         try:
-            # Generate the feature vector for the last row (latest kline)
             feats = generate_normalized_features(df)
             latest_feat = feats.iloc[[-1]]
             
-            # Verify no NaNs are present in features
             if latest_feat[self.feature_cols].isnull().values.any():
-                logger.debug("Latest feature vector contains NaNs due to bootstrapping. Returning 0.5.")
-                return 0.5
+                return 0.5, 0.5
                 
-            # Run prediction probability for class 1
-            prob = self.model.predict_proba(latest_feat[self.feature_cols])[0, 1]
-            return float(prob)
+            if self.model_long is not None:
+                prob_long = float(self.model_long.predict_proba(latest_feat[self.feature_cols])[0, 1])
+                
+            if self.model_short is not None:
+                prob_short = float(self.model_short.predict_proba(latest_feat[self.feature_cols])[0, 1])
+                
+            return prob_long, prob_short
         except Exception as e:
             logger.error(f"Error running model prediction: {e}")
-            return 0.5
+            return 0.5, 0.5

@@ -433,11 +433,13 @@
             container.innerHTML = positions.map(pos => {
                 const profitColor = pos.pnl >= 0 ? 'text-emerald-400' : 'text-rose-500';
                 const sign = pos.pnl >= 0 ? '+' : '';
+                const side = pos.side || 'BUY';
+                const badgeClass = side === 'SELL' ? 'bg-rose-500/10 text-rose-400' : 'bg-indigo-500/10 text-indigo-400';
                 return `
                     <div class="bg-slate-900/50 border border-gray-800/60 rounded-xl p-4 flex flex-col gap-2 relative overflow-hidden">
                         <div class="flex items-center justify-between">
                             <span class="font-bold text-white">${pos.symbol}</span>
-                            <span class="indicator-pill bg-indigo-500/10 text-indigo-400">BUY</span>
+                            <span class="indicator-pill ${badgeClass}">${side}</span>
                         </div>
                         <div class="grid grid-cols-2 gap-y-1.5 text-xs text-gray-400 mt-1">
                             <div>Qty: <span class="text-gray-200 font-medium">${pos.quantity.toFixed(6)}</span></div>
@@ -470,11 +472,13 @@
                 const timeStr = date.toLocaleTimeString(undefined, {hour: '2-digit', minute:'2-digit', second:'2-digit'});
                 const profitColor = t.pnl > 0 ? 'text-emerald-400' : (t.pnl < 0 ? 'text-rose-500' : 'text-gray-400');
                 const sign = t.pnl > 0 ? '+' : '';
+                const side = t.side || 'BUY';
+                const badgeClass = side === 'SELL' ? 'bg-rose-500/10 text-rose-400' : 'bg-indigo-500/10 text-indigo-400';
                 return `
                     <tr class="hover:bg-slate-900/20">
                         <td class="py-3.5 px-4 font-mono text-xs text-gray-500">${timeStr}</td>
                         <td class="py-3.5 px-4 font-bold text-white">${t.symbol}</td>
-                        <td class="py-3.5 px-4"><span class="indicator-pill bg-indigo-500/10 text-indigo-400">BUY</span></td>
+                        <td class="py-3.5 px-4"><span class="indicator-pill ${badgeClass}">${side}</span></td>
                         <td class="py-3.5 px-4 font-mono">${t.entry_price.toFixed(4)}</td>
                         <td class="py-3.5 px-4 font-mono">${t.exit_price ? t.exit_price.toFixed(4) : '-'}</td>
                         <td class="py-3.5 px-4 font-mono">${t.quantity.toFixed(4)}</td>
@@ -494,11 +498,16 @@
             }
             
             container.innerHTML = predictions.map(pred => {
+                const side = pred.side || 'BUY';
                 let badgeClass = "bg-rose-500/10 text-rose-500 border border-rose-500/20";
                 if (pred.confidence > 75) {
-                    badgeClass = "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold glass-card-glow";
+                    badgeClass = side === 'SELL'
+                        ? "bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold glass-card-glow"
+                        : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold glass-card-glow";
                 } else if (pred.confidence > 50) {
-                    badgeClass = "bg-amber-500/10 text-amber-400 border border-amber-500/20";
+                    badgeClass = side === 'SELL'
+                        ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                        : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
                 }
                 
                 return `
@@ -512,7 +521,7 @@
                                 <span>Vol Chg: <span class="${pred.volume_change >= 0 ? 'text-emerald-400' : 'text-rose-500'}">${pred.volume_change.toFixed(1)}%</span></span>
                                 <span>ATR: <span class="text-indigo-400">${pred.atr.toFixed(4)}</span></span>
                             </div>
-                            <span class="indicator-pill px-2.5 py-1 ${badgeClass}">${pred.confidence.toFixed(1)}%</span>
+                            <span class="indicator-pill px-2.5 py-1 ${badgeClass}">${side} ${pred.confidence.toFixed(1)}%</span>
                         </div>
                     </div>
                 `;

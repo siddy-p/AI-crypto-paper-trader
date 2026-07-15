@@ -1,6 +1,11 @@
 import logging
 import datetime
 import sqlite3
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    pass
 from flask import Flask, jsonify, render_template
 from src import config
 from src import database

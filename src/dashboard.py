@@ -205,6 +205,27 @@ def create_app(trader_bot):
         except Exception as e:
             logger.error(f"Error executing db_inspect: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
+
+    @app.route("/api/db_reset", methods=["POST"])
+    def api_db_reset():
+        try:
+            # Clear historical records
+            database.execute_write("DELETE FROM trades")
+            database.execute_write("DELETE FROM portfolio_history")
+            database.execute_write("DELETE FROM daily_reports")
+            
+            # Reset in-memory balance to the environment variable configuration value
+            with trader_bot.lock:
+                trader_bot.simulated_usdt = config.INITIAL_USDT_BALANCE
+                
+            # Log new initial snapshot
+            database.log_portfolio(config.INITIAL_USDT_BALANCE, config.INITIAL_USDT_BALANCE)
+            
+            logger.info(f"User requested database reset. Initial balance reset to ${config.INITIAL_USDT_BALANCE}")
+            return jsonify({"success": True, "message": f"Successfully reset database stats! Initial balance is now set to ${config.INITIAL_USDT_BALANCE}."})
+        except Exception as e:
+            logger.error(f"Failed to reset database: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
      
     return app
 

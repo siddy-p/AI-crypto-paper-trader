@@ -236,6 +236,9 @@
                     <button onclick="openDbInspector()" class="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-gray-800 font-semibold text-gray-300 active:translate-y-0.5 transition-all text-sm">
                         <i class="fas fa-database mr-1.5"></i> Inspect Raw Database
                     </button>
+                    <button id="btn-reset-db" onclick="resetDatabase()" class="w-full py-2.5 px-4 rounded-xl bg-rose-950/20 hover:bg-rose-900/30 border border-rose-900/30 hover:border-rose-500/40 font-semibold text-rose-400 hover:text-rose-300 active:translate-y-0.5 transition-all text-sm">
+                        <i class="fas fa-trash-alt mr-1.5"></i> Reset Database Stats
+                    </button>
                 </div>
             </div>
         </section>
@@ -389,7 +392,34 @@
                 btn.innerHTML = '<i class="fas fa-play mr-1.5"></i> Trigger Test Trade';
             }
         }
-
+    
+        // Reset database history via API
+        async function resetDatabase() {
+            if (!confirm("Are you sure you want to reset the database and wipe all trading history? This will set your starting balance back to the configured default cash value.")) {
+                return;
+            }
+            const btn = document.getElementById('btn-reset-db');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner animate-spin mr-1.5"></i> Resetting...';
+            try {
+                const response = await fetch('/api/db_reset', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    alert(data.message);
+                    fetchStatus();
+                    window.location.reload();
+                } else {
+                    alert("Error: " + data.error);
+                }
+            } catch (error) {
+                console.error("Error resetting database:", error);
+                alert("Request failed. Please check if your Render web service is awake.");
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-trash-alt mr-1.5"></i> Reset Database Stats';
+            }
+        }
+    
         function updateDashboardMetrics(metrics) {
             document.getElementById('stat-portfolio-value').innerText = `$${metrics.portfolio_value.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
             document.getElementById('stat-available-usdt').innerText = `$${metrics.available_usdt.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;

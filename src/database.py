@@ -210,9 +210,9 @@ def save_candles(candles_data):
     try:
         cursor = conn.cursor()
         if DB_TYPE == "postgres":
-            cursor.executemany("""
+            psycopg2.extras.execute_values(cursor, """
             INSERT INTO candles (symbol, open_time, open, high, low, close, volume)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            VALUES %s
             ON CONFLICT (symbol, open_time) DO UPDATE SET
                 open = EXCLUDED.open,
                 high = EXCLUDED.high,

@@ -1,6 +1,4 @@
 import sqlite3
-import psycopg2
-import psycopg2.extras
 import datetime
 import math
 import logging
@@ -8,24 +6,45 @@ from src import config
 
 logger = logging.getLogger(__name__)
 
-IS_POSTGRES = bool(config.DATABASE_URL)
+# Resilient imports for PostgreSQL driver
+try:
+    import psycopg2
+    import psycopg2.extras
+    HAS_PSYCOPG2 = True
+except ImportError as e:
+    logger.warning(f"Could not import psycopg2: {e}. PostgreSQL support will be disabled.")
+    HAS_PSYCOPG2 = False
+
+# Global state to track active database type dynamically
+DB_TYPE = "sqlite"  # "sqlite" or "postgres"
 
 def get_db_connection():
-    if IS_POSTGRES:
-        conn = psycopg2.connect(config.DATABASE_URL)
-        return conn
+    global DB_TYPE
+    if config.DATABASE_URL and HAS_PSYCOPG2:
+        try:
+            conn = psycopg2.connect(config.DATABASE_URL, connect_timeout=5)
+            DB_TYPE = "postgres"
+            return conn
+        except Exception as e:
+            logger.error(f"PostgreSQL connection failed: {e}. Falling back to SQLite...")
+            DB_TYPE = "sqlite"
+            conn = sqlite3.connect(config.DB_PATH)
+            conn.row_factory = sqlite3.Row
+            return conn
     else:
+        DB_TYPE = "sqlite"
         conn = sqlite3.connect(config.DB_PATH)
         conn.row_factory = sqlite3.Row
         return conn
 
 def execute_query(query, params=None):
     """Executes a SELECT query and returns rows as a list of dicts."""
+    global DB_TYPE
     if params is None:
         params = ()
     conn = get_db_connection()
     try:
-        if IS_POSTGRES:
+        if DB_TYPE == "postgres":
             # Convert SQLite placeholders (?) to Postgres placeholders (%s)
             query = query.replace("?", "%s")
             cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -42,11 +61,12 @@ def execute_query(query, params=None):
 
 def execute_write(query, params=None, return_last_id=False):
     """Executes an INSERT/UPDATE/DELETE query and commits."""
+    global DB_TYPE
     if params is None:
         params = ()
     conn = get_db_connection()
     try:
-        if IS_POSTGRES:
+        if DB_TYPE == "postgres":
             query = query.replace("?", "%s")
             if return_last_id and "INSERT" in query.upper() and "RETURNING" not in query.upper():
                 query += " RETURNING id"
@@ -70,7 +90,8 @@ def init_db():
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        if IS_POSTGRES:
+        if DB_TYPE == "postgres":
+            logger.info("Initializing Supabase PostgreSQL Database Tables...")
             # Postgres Schema
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS trades (
@@ -122,6 +143,7 @@ def init_db():
             )
             """)
         else:
+            logger.info("Initializing Local SQLite Database Tables...")
             # SQLite Schema
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS trades (
@@ -187,7 +209,7 @@ def save_candles(candles_data):
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        if IS_POSTGRES:
+        if DB_TYPE == "postgres":
             cursor.executemany("""
             INSERT INTO candles (symbol, open_time, open, high, low, close, volume)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -331,7 +353,7 @@ def generate_daily_report(date_str=None):
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        if IS_POSTGRES:
+        if DB_TYPE == "postgres":
             cursor.execute("""
             INSERT INTO daily_reports (date, total_trades, win_rate, total_pnl, portfolio_value, max_drawdown, sharpe_ratio)
             VALUES (%s, %s, %s, %s, %s, %s, %s)

@@ -126,7 +126,11 @@ class BinanceClient:
                 response.raise_for_status()
                 klines = response.json()
             except Exception as e_inner:
-                logger.error(f"Failed to fetch klines from both Mainnet and Testnet for {symbol}: {e_inner}")
+                # 400 Bad Request means the token pair is not listed/supported on the Testnet API
+                if isinstance(e_inner, requests.exceptions.HTTPError) and e_inner.response is not None and e_inner.response.status_code == 400:
+                    logger.info(f"Symbol {symbol} is not supported on Binance Testnet (400 Bad Request).")
+                else:
+                    logger.warning(f"Failed to fetch klines from both Mainnet and Testnet for {symbol}: {e_inner}")
                 return []
                 
         # Format: [ [open_time, open, high, low, close, volume, close_time, ...], ... ]

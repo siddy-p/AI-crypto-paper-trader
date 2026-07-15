@@ -26,14 +26,30 @@ def main():
     model_manager = CryptoModelManager()
     trader = Trader(binance_client, model_manager)
     
-    # 2. Bootstrap data cache, portfolio value, and machine learning models
+    # 2. Initialize Flask Dashboard App immediately
+    flask_app = create_app(trader)
+    
+    # 3. Spin up dashboard in a separate concurrent thread immediately
+    # This binds the port (5001) in <1s, passing Render's deployment health checks.
+    logger.info("Starting dashboard web server thread...")
+    dashboard_thread = threading.Thread(
+        target=run_dashboard,
+        args=(flask_app,),
+        daemon=True
+    )
+    dashboard_thread.start()
+    
+    # Give the web server a moment to bind and launch
+    time.sleep(1.0)
+    
+    # 4. Bootstrap data cache, portfolio value, and machine learning models in background
     try:
         trader.bootstrap_system()
     except Exception as e:
         logger.critical(f"Critical failure during system bootstrap: {e}")
         sys.exit(1)
         
-    # 3. Define callback to handle real-time WebSocket ticks
+    # 5. Define callback to handle real-time WebSocket ticks
     def handle_websocket_candle_update(symbol, is_closed, open_time, open_price, high_price, low_price, close_price, volume):
         trader.handle_live_tick(
             symbol=symbol,
@@ -46,21 +62,10 @@ def main():
             volume=volume
         )
         
-    # 4. Start WebSocket stream connection in the background
+    # 6. Start WebSocket stream connection in the background
     logger.info("Starting live market data WebSocket stream...")
     binance_client.start_websocket_stream(trader.symbols, handle_websocket_candle_update)
     trader.is_running = True
-    
-    # 5. Initialize Flask Dashboard App
-    flask_app = create_app(trader)
-    
-    # 6. Spin up dashboard in a separate concurrent thread
-    dashboard_thread = threading.Thread(
-        target=run_dashboard,
-        args=(flask_app,),
-        daemon=True
-    )
-    dashboard_thread.start()
     
     logger.info("Antigravity trading system is fully operational.")
     

@@ -96,10 +96,9 @@ class BinanceClient:
 
     def fetch_historical_klines(self, symbol, interval="1m", limit=500, start_time=None):
         """
-        Fetches historical klines from Binance Mainnet (no auth needed)
-        to bootstrap our training and features data.
+        Fetches historical klines. Tries Binance Mainnet (no auth needed) first,
+        and falls back to Binance Testnet if rate-limited or blocked (e.g. on shared hostings).
         """
-        url = f"{config.BINANCE_MAINNET_REST_URL}/api/v3/klines"
         params = {
             "symbol": symbol,
             "interval": interval,
@@ -108,25 +107,39 @@ class BinanceClient:
         if start_time:
             params["startTime"] = start_time
             
+        # Try Mainnet first
+        url_mainnet = f"{config.BINANCE_MAINNET_REST_URL}/api/v3/klines"
         try:
-            response = requests.get(url, params=params, timeout=10)
+            response = requests.get(url_mainnet, params=params, timeout=10)
+            if response.status_code in (418, 429):
+                logger.warning(f"Mainnet API returned {response.status_code} for {symbol}. Falling back to Testnet...")
+                raise requests.exceptions.RequestException(f"Rate limited or teapot: {response.status_code}")
             response.raise_for_status()
             klines = response.json()
-            # Format: [ [open_time, open, high, low, close, volume, close_time, ...], ... ]
-            formatted = []
-            for k in klines:
-                formatted.append({
-                    "open_time": int(k[0]),
-                    "open": float(k[1]),
-                    "high": float(k[2]),
-                    "low": float(k[3]),
-                    "close": float(k[4]),
-                    "volume": float(k[5])
-                })
-            return formatted
         except Exception as e:
-            logger.error(f"Error fetching klines for {symbol}: {e}")
-            return []
+            # Fallback to Testnet REST API
+            logger.warning(f"Error fetching klines from Mainnet for {symbol} ({e}). Trying Testnet...")
+            url_testnet = f"{config.BINANCE_TESTNET_REST_URL}/api/v3/klines"
+            try:
+                response = requests.get(url_testnet, params=params, timeout=10)
+                response.raise_for_status()
+                klines = response.json()
+            except Exception as e_inner:
+                logger.error(f"Failed to fetch klines from both Mainnet and Testnet for {symbol}: {e_inner}")
+                return []
+                
+        # Format: [ [open_time, open, high, low, close, volume, close_time, ...], ... ]
+        formatted = []
+        for k in klines:
+            formatted.append({
+                "open_time": int(k[0]),
+                "open": float(k[1]),
+                "high": float(k[2]),
+                "low": float(k[3]),
+                "close": float(k[4]),
+                "volume": float(k[5])
+            })
+        return formatted
 
     # Signed endpoints
     def get_account_balance(self):

@@ -47,6 +47,17 @@ def create_app(trader_bot):
                     "pnl_pct": round(pnl_pct, 2)
                 })
             
+            # Fetch database record counts to show update health
+            conn = database.get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM candles")
+            candle_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM trades")
+            trade_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM portfolio_history")
+            history_count = cursor.fetchone()[0]
+            conn.close()
+            
             return jsonify({
                 "success": True,
                 "metrics": metrics,
@@ -55,10 +66,58 @@ def create_app(trader_bot):
                 "model_predictions": model_predictions,
                 "safety_disabled": config.DISABLE_ORDER_EXECUTION,
                 "last_retrain_date": str(trader_bot.last_retrain_date) if trader_bot.last_retrain_date else "Never",
-                "system_status": "RUNNING" if trader_bot.is_running else "STOPPED"
+                "system_status": "RUNNING" if trader_bot.is_running else "STOPPED",
+                "db_stats": {
+                    "candles": candle_count,
+                    "trades": trade_count,
+                    "history": history_count
+                }
             })
         except Exception as e:
             logger.error(f"Error serving status API: {e}")
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    @app.route("/api/test_trade", methods=["POST"])
+    def api_test_trade():
+        try:
+            # Force open a simulated trade for BTCUSDT at the latest streamed price
+            symbol = "BTCUSDT"
+            latest_price = trader_bot.latest_prices.get(symbol, 65000.0)
+            
+            # Check if already holding
+            open_trades = database.get_open_trades()
+            if any(t["symbol"] == symbol for t in open_trades):
+                return jsonify({"success": False, "error": f"Already holding an open position for {symbol}."})
+                
+            # Use a $10 position size for this test order
+            usdt_size = 10.0
+            qty = usdt_size / latest_price
+            stop_loss = latest_price * 0.99
+            take_profit = latest_price * 1.02
+            
+            # Force simulated balance execution
+            with trader_bot.lock:
+                trader_bot.simulated_usdt -= usdt_size
+                
+            database.add_trade(
+                symbol=symbol,
+                side="BUY",
+                entry_price=latest_price,
+                quantity=qty,
+                confidence=85.0,
+                stop_loss=stop_loss,
+                take_profit=take_profit
+            )
+            
+            # Write new history snapshot
+            portfolio_val = trader_bot.get_portfolio_value()
+            available_cash = trader_bot.get_available_usdt()
+            database.log_portfolio(portfolio_val, available_cash)
+            
+            logger.info(f"Triggered manual test trade on {symbol} at price ${latest_price:.2f}")
+            return jsonify({"success": True, "message": f"Successfully forced a test BUY on {symbol} at ${latest_price:.2f}!"})
+        except Exception as e:
+            logger.error(f"Failed to open manual test trade: {e}")
             return jsonify({"success": False, "error": str(e)}), 500
 
     @app.route("/api/portfolio_history")

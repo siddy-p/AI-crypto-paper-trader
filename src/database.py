@@ -1,76 +1,180 @@
 import sqlite3
+import psycopg2
+import psycopg2.extras
 import datetime
 import math
-from src.config import DB_PATH
+import logging
+from src import config
+
+logger = logging.getLogger(__name__)
+
+IS_POSTGRES = bool(config.DATABASE_URL)
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    if IS_POSTGRES:
+        conn = psycopg2.connect(config.DATABASE_URL)
+        return conn
+    else:
+        conn = sqlite3.connect(config.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+def execute_query(query, params=None):
+    """Executes a SELECT query and returns rows as a list of dicts."""
+    if params is None:
+        params = ()
+    conn = get_db_connection()
+    try:
+        if IS_POSTGRES:
+            # Convert SQLite placeholders (?) to Postgres placeholders (%s)
+            query = query.replace("?", "%s")
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        else:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+    finally:
+        conn.close()
+
+def execute_write(query, params=None, return_last_id=False):
+    """Executes an INSERT/UPDATE/DELETE query and commits."""
+    if params is None:
+        params = ()
+    conn = get_db_connection()
+    try:
+        if IS_POSTGRES:
+            query = query.replace("?", "%s")
+            if return_last_id and "INSERT" in query.upper() and "RETURNING" not in query.upper():
+                query += " RETURNING id"
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            last_id = None
+            if return_last_id and "RETURNING" in query.upper():
+                last_id = cursor.fetchone()[0]
+            conn.commit()
+            return last_id
+        else:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            last_id = cursor.lastrowid if return_last_id else None
+            conn.commit()
+            return last_id
+    finally:
+        conn.close()
 
 def init_db():
     conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # 1. Create trades table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS trades (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        symbol TEXT NOT NULL,
-        side TEXT NOT NULL,          -- BUY
-        entry_price REAL NOT NULL,
-        exit_price REAL,
-        entry_time TEXT NOT NULL,
-        exit_time TEXT,
-        quantity REAL NOT NULL,
-        confidence REAL NOT NULL,
-        pnl REAL DEFAULT 0.0,
-        status TEXT NOT NULL,        -- OPEN, CLOSED
-        stop_loss REAL NOT NULL,
-        take_profit REAL NOT NULL,
-        exit_reason TEXT             -- STOP_LOSS, TAKE_PROFIT, MANUAL, SAFETY_DISABLE, RETRAIN
-    )
-    """)
-    
-    # 2. Create portfolio history table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS portfolio_history (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        timestamp TEXT NOT NULL,
-        total_value REAL NOT NULL,
-        available_usdt REAL NOT NULL
-    )
-    """)
-    
-    # 3. Create candle cache table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS candles (
-        symbol TEXT NOT NULL,
-        open_time INTEGER NOT NULL,
-        open REAL NOT NULL,
-        high REAL NOT NULL,
-        low REAL NOT NULL,
-        close REAL NOT NULL,
-        volume REAL NOT NULL,
-        PRIMARY KEY (symbol, open_time)
-    )
-    """)
-    
-    # 4. Create daily performance reports table
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS daily_reports (
-        date TEXT PRIMARY KEY,
-        total_trades INTEGER NOT NULL,
-        win_rate REAL NOT NULL,
-        total_pnl REAL NOT NULL,
-        portfolio_value REAL NOT NULL,
-        max_drawdown REAL NOT NULL,
-        sharpe_ratio REAL NOT NULL
-    )
-    """)
-    
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        if IS_POSTGRES:
+            # Postgres Schema
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trades (
+                id SERIAL PRIMARY KEY,
+                symbol VARCHAR(20) NOT NULL,
+                side VARCHAR(10) NOT NULL,
+                entry_price DOUBLE PRECISION NOT NULL,
+                exit_price DOUBLE PRECISION,
+                entry_time VARCHAR(50) NOT NULL,
+                exit_time VARCHAR(50),
+                quantity DOUBLE PRECISION NOT NULL,
+                confidence DOUBLE PRECISION NOT NULL,
+                pnl DOUBLE PRECISION DEFAULT 0.0,
+                status VARCHAR(10) NOT NULL,
+                stop_loss DOUBLE PRECISION NOT NULL,
+                take_profit DOUBLE PRECISION NOT NULL,
+                exit_reason VARCHAR(50)
+            )
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS portfolio_history (
+                id SERIAL PRIMARY KEY,
+                timestamp VARCHAR(50) NOT NULL,
+                total_value DOUBLE PRECISION NOT NULL,
+                available_usdt DOUBLE PRECISION NOT NULL
+            )
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS candles (
+                symbol VARCHAR(20) NOT NULL,
+                open_time BIGINT NOT NULL,
+                open DOUBLE PRECISION NOT NULL,
+                high DOUBLE PRECISION NOT NULL,
+                low DOUBLE PRECISION NOT NULL,
+                close DOUBLE PRECISION NOT NULL,
+                volume DOUBLE PRECISION NOT NULL,
+                PRIMARY KEY (symbol, open_time)
+            )
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS daily_reports (
+                date VARCHAR(20) PRIMARY KEY,
+                total_trades INTEGER NOT NULL,
+                win_rate DOUBLE PRECISION NOT NULL,
+                total_pnl DOUBLE PRECISION NOT NULL,
+                portfolio_value DOUBLE PRECISION NOT NULL,
+                max_drawdown DOUBLE PRECISION NOT NULL,
+                sharpe_ratio DOUBLE PRECISION NOT NULL
+            )
+            """)
+        else:
+            # SQLite Schema
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                exit_price REAL,
+                entry_time TEXT NOT NULL,
+                exit_time TEXT,
+                quantity REAL NOT NULL,
+                confidence REAL NOT NULL,
+                pnl REAL DEFAULT 0.0,
+                status TEXT NOT NULL,
+                stop_loss REAL NOT NULL,
+                take_profit REAL NOT NULL,
+                exit_reason TEXT
+            )
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS portfolio_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                total_value REAL NOT NULL,
+                available_usdt REAL NOT NULL
+            )
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS candles (
+                symbol TEXT NOT NULL,
+                open_time INTEGER NOT NULL,
+                open REAL NOT NULL,
+                high REAL NOT NULL,
+                low REAL NOT NULL,
+                close REAL NOT NULL,
+                volume REAL NOT NULL,
+                PRIMARY KEY (symbol, open_time)
+            )
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS daily_reports (
+                date TEXT PRIMARY KEY,
+                total_trades INTEGER NOT NULL,
+                win_rate REAL NOT NULL,
+                total_pnl REAL NOT NULL,
+                portfolio_value REAL NOT NULL,
+                max_drawdown REAL NOT NULL,
+                sharpe_ratio REAL NOT NULL
+            )
+            """)
+        conn.commit()
+    finally:
+        conn.close()
 
 # Candle cache helpers
 def save_candles(candles_data):
@@ -81,113 +185,83 @@ def save_candles(candles_data):
     if not candles_data:
         return
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.executemany("""
-    INSERT OR REPLACE INTO candles (symbol, open_time, open, high, low, close, volume)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, candles_data)
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        if IS_POSTGRES:
+            cursor.executemany("""
+            INSERT INTO candles (symbol, open_time, open, high, low, close, volume)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (symbol, open_time) DO UPDATE SET
+                open = EXCLUDED.open,
+                high = EXCLUDED.high,
+                low = EXCLUDED.low,
+                close = EXCLUDED.close,
+                volume = EXCLUDED.volume
+            """, candles_data)
+        else:
+            cursor.executemany("""
+            INSERT OR REPLACE INTO candles (symbol, open_time, open, high, low, close, volume)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, candles_data)
+        conn.commit()
+    finally:
+        conn.close()
 
 def get_latest_candle_time(symbol):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT MAX(open_time) FROM candles WHERE symbol = ?", (symbol,))
-    row = cursor.fetchone()
-    conn.close()
-    return row[0] if row and row[0] is not None else 0
+    rows = execute_query("SELECT MAX(open_time) AS max_val FROM candles WHERE symbol = ?", (symbol,))
+    if rows and rows[0]["max_val"] is not None:
+        return int(rows[0]["max_val"])
+    return 0
 
 def get_cached_candles(symbol, limit=10000):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
+    return execute_query("""
     SELECT open_time, open, high, low, close, volume 
     FROM candles 
     WHERE symbol = ? 
     ORDER BY open_time ASC
     """, (symbol,))
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
 
 # Trade logging helpers
 def add_trade(symbol, side, entry_price, quantity, confidence, stop_loss, take_profit):
-    conn = get_db_connection()
-    cursor = conn.cursor()
     entry_time = datetime.datetime.now().isoformat()
-    cursor.execute("""
+    trade_id = execute_write("""
     INSERT INTO trades (symbol, side, entry_price, entry_time, quantity, confidence, stop_loss, take_profit, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN')
-    """, (symbol, side, entry_price, entry_time, quantity, confidence, stop_loss, take_profit))
-    trade_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
+    """, (symbol, side, entry_price, entry_time, quantity, confidence, stop_loss, take_profit), return_last_id=True)
     return trade_id
 
 def close_trade(trade_id, exit_price, pnl, exit_reason):
-    conn = get_db_connection()
-    cursor = conn.cursor()
     exit_time = datetime.datetime.now().isoformat()
-    cursor.execute("""
+    execute_write("""
     UPDATE trades 
     SET exit_price = ?, exit_time = ?, pnl = ?, status = 'CLOSED', exit_reason = ?
     WHERE id = ?
     """, (exit_price, exit_time, pnl, exit_reason, trade_id))
-    conn.commit()
-    conn.close()
 
 def get_open_trades():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM trades WHERE status = 'OPEN'")
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    return execute_query("SELECT * FROM trades WHERE status = 'OPEN'")
 
 def get_trade_history(limit=100):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM trades ORDER BY entry_time DESC LIMIT ?", (limit,))
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    return execute_query("SELECT * FROM trades ORDER BY entry_time DESC LIMIT ?", (limit,))
 
 # Portfolio logging helpers
 def log_portfolio(total_value, available_usdt):
-    conn = get_db_connection()
-    cursor = conn.cursor()
     timestamp = datetime.datetime.now().isoformat()
-    cursor.execute("""
+    execute_write("""
     INSERT INTO portfolio_history (timestamp, total_value, available_usdt)
     VALUES (?, ?, ?)
     """, (timestamp, total_value, available_usdt))
-    conn.commit()
-    conn.close()
 
 def get_portfolio_history(limit=1000):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM portfolio_history ORDER BY timestamp ASC LIMIT ?", (limit,))
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    return execute_query("SELECT * FROM portfolio_history ORDER BY timestamp ASC LIMIT ?", (limit,))
 
 # Statistics and metrics calculations
 def calculate_metrics():
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    closed_trades = execute_query("SELECT * FROM trades WHERE status = 'CLOSED'")
+    latest_portfolio = execute_query("SELECT total_value, available_usdt FROM portfolio_history ORDER BY id DESC LIMIT 1")
     
-    # Fetch all closed trades to compute statistics
-    cursor.execute("SELECT * FROM trades WHERE status = 'CLOSED'")
-    closed_trades = [dict(row) for row in cursor.fetchall()]
-    
-    # Fetch latest portfolio values
-    cursor.execute("SELECT total_value, available_usdt FROM portfolio_history ORDER BY id DESC LIMIT 1")
-    latest_portfolio = cursor.fetchone()
-    conn.close()
-    
-    portfolio_value = latest_portfolio['total_value'] if latest_portfolio else 10000.0
-    available_usdt = latest_portfolio['available_usdt'] if latest_portfolio else 10000.0
+    portfolio_value = latest_portfolio[0]['total_value'] if latest_portfolio else config.INITIAL_USDT_BALANCE
+    available_usdt = latest_portfolio[0]['available_usdt'] if latest_portfolio else config.INITIAL_USDT_BALANCE
     
     total_trades = len(closed_trades)
     if total_trades == 0:
@@ -219,7 +293,6 @@ def calculate_metrics():
                 max_drawdown = dd
                 
     # Sharpe Ratio Calculation
-    # We compute periodic returns based on logged portfolio values
     sharpe_ratio = 0.0
     if len(history) > 5:
         returns = []
@@ -235,13 +308,6 @@ def calculate_metrics():
             std_dev = math.sqrt(variance)
             
             if std_dev > 0:
-                # Annualize the Sharpe ratio assuming portfolio snapshots are recorded frequently.
-                # Since we log every minute, annualized factor is sqrt(60 * 24 * 365) = sqrt(525600)
-                # To be conservative and avoid massive swings from minute data, we can use the simple ratio
-                # or multiply by sqrt(252 * 288) depending on interval. Let's do the simple Sharpe of returns first,
-                # then scale it safely. A common way for high-frequency is: Sharpe = (mean / std) * sqrt(periods_per_year).
-                # Let's assume hourly log updates or just standard 1-min intervals. Let's multiply by sqrt(525600) to annualize,
-                # but capped to avoid extreme ratios.
                 sharpe_ratio = (avg_return / std_dev) * math.sqrt(525600)
             else:
                 sharpe_ratio = 0.0
@@ -258,36 +324,49 @@ def calculate_metrics():
 
 # Daily report functions
 def generate_daily_report(date_str=None):
-    """
-    Computes performance metrics for a specific date and logs it to daily_reports.
-    date_str: YYYY-MM-DD
-    """
     if date_str is None:
         date_str = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
         
     metrics = calculate_metrics()
-    
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-    INSERT OR REPLACE INTO daily_reports (date, total_trades, win_rate, total_pnl, portfolio_value, max_drawdown, sharpe_ratio)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (
-        date_str, 
-        metrics['total_trades'], 
-        metrics['win_rate'], 
-        metrics['total_pnl'], 
-        metrics['portfolio_value'], 
-        metrics['max_drawdown'], 
-        metrics['sharpe_ratio']
-    ))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        if IS_POSTGRES:
+            cursor.execute("""
+            INSERT INTO daily_reports (date, total_trades, win_rate, total_pnl, portfolio_value, max_drawdown, sharpe_ratio)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (date) DO UPDATE SET
+                total_trades = EXCLUDED.total_trades,
+                win_rate = EXCLUDED.win_rate,
+                total_pnl = EXCLUDED.total_pnl,
+                portfolio_value = EXCLUDED.portfolio_value,
+                max_drawdown = EXCLUDED.max_drawdown,
+                sharpe_ratio = EXCLUDED.sharpe_ratio
+            """, (
+                date_str, 
+                metrics['total_trades'], 
+                metrics['win_rate'], 
+                metrics['total_pnl'], 
+                metrics['portfolio_value'], 
+                metrics['max_drawdown'], 
+                metrics['sharpe_ratio']
+            ))
+        else:
+            cursor.execute("""
+            INSERT OR REPLACE INTO daily_reports (date, total_trades, win_rate, total_pnl, portfolio_value, max_drawdown, sharpe_ratio)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                date_str, 
+                metrics['total_trades'], 
+                metrics['win_rate'], 
+                metrics['total_pnl'], 
+                metrics['portfolio_value'], 
+                metrics['max_drawdown'], 
+                metrics['sharpe_ratio']
+            ))
+        conn.commit()
+    finally:
+        conn.close()
 
 def get_daily_reports(limit=30):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM daily_reports ORDER BY date DESC LIMIT ?", (limit,))
-    rows = cursor.fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    return execute_query("SELECT * FROM daily_reports ORDER BY date DESC LIMIT ?", (limit,))

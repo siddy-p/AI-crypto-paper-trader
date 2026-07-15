@@ -35,3 +35,6 @@ DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
 
 # Initial balance for local simulation if Binance Testnet is disabled or credentials missing
 INITIAL_USDT_BALANCE = float(os.getenv("INITIAL_USDT_BALANCE", "10000.0"))
+
+# PostgreSQL Database URL
+DATABASE_URL = os.getenv("DATABASE_URL", "")

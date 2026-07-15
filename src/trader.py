@@ -46,12 +46,13 @@ class Trader:
         logger.info("Initializing trading bot bootstrap...")
         database.init_db()
         
-        # 1. Fetch top 20 symbols
-        self.symbols = self.client.get_top_20_usdt_pairs()
+        # 1. Fetch top symbols
+        all_symbols = self.client.get_top_20_usdt_pairs()
+        self.symbols = []
         
         # 2. Seed buffers and database cache
         candles_to_save = []
-        for symbol in self.symbols:
+        for symbol in all_symbols:
             logger.info(f"Bootstrapping historical data for {symbol}...")
             # Check latest cached candle time to see if we can perform an incremental fetch
             latest_time = database.get_latest_candle_time(symbol)
@@ -61,6 +62,13 @@ class Trader:
             fetch_limit = 1000 if latest_time == 0 else 500
             klines = self.client.fetch_historical_klines(symbol, limit=fetch_limit)
             
+            # Skip tracking this symbol if the API failed to fetch historical data
+            if len(klines) < 60:
+                logger.warning(f"Skipping symbol {symbol} due to insufficient historical candles ({len(klines)} fetched).")
+                continue
+                
+            self.symbols.append(symbol)
+            
             for k in klines:
                 candles_to_save.append((
                     symbol, k["open_time"], k["open"], k["high"], k["low"], k["close"], k["volume"]
@@ -68,10 +76,9 @@ class Trader:
             
             # Populate in-memory buffers
             self.buffers[symbol] = klines
-            if klines:
-                self.latest_prices[symbol] = klines[-1]["close"]
-                
-            time.sleep(0.1) # Small rate-limit protection
+            self.latest_prices[symbol] = klines[-1]["close"]
+            
+            time.sleep(0.05) # Small rate-limit protection
 
         # Save bootstrap candles to database
         if candles_to_save:

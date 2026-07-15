@@ -38,3 +38,6 @@ INITIAL_USDT_BALANCE = float(os.getenv("INITIAL_USDT_BALANCE", "10000.0"))
 
 # PostgreSQL Database URL
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+# Maximum number of symbols to fetch and track dynamically
+MAX_SYMBOLS = int(os.getenv("MAX_SYMBOLS", "20"))

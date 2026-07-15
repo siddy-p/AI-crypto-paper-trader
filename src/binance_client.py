@@ -87,12 +87,13 @@ class BinanceClient:
             usdt_tickers = [t for t in tickers if t['symbol'].endswith('USDT') and not t['symbol'].endswith('UPUSDT') and not t['symbol'].endswith('DOWNUSDT')]
             usdt_tickers.sort(key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)
             
-            top_symbols = [t['symbol'] for t in usdt_tickers[:20]]
-            logger.info(f"Successfully fetched top 20 USDT trading pairs dynamically: {top_symbols}")
+            limit = config.MAX_SYMBOLS
+            top_symbols = [t['symbol'] for t in usdt_tickers[:limit]]
+            logger.info(f"Successfully fetched top {len(top_symbols)} USDT trading pairs dynamically.")
             return top_symbols
         except Exception as e:
             logger.warning(f"Failed to fetch top USDT pairs dynamically ({e}). Using hardcoded fallbacks.")
-            return self.fallback_pairs
+            return self.fallback_pairs[:config.MAX_SYMBOLS]
 
     def fetch_historical_klines(self, symbol, interval="1m", limit=500, start_time=None):
         """

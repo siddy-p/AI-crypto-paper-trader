@@ -113,13 +113,13 @@ class BinanceClient:
         try:
             response = requests.get(url_mainnet, params=params, timeout=10)
             if response.status_code in (418, 429):
-                logger.warning(f"Mainnet API returned {response.status_code} for {symbol}. Falling back to Testnet...")
+                logger.info(f"Mainnet API returned {response.status_code} for {symbol}. Falling back to Testnet...")
                 raise requests.exceptions.RequestException(f"Rate limited or teapot: {response.status_code}")
             response.raise_for_status()
             klines = response.json()
         except Exception as e:
             # Fallback to Testnet REST API
-            logger.warning(f"Error fetching klines from Mainnet for {symbol} ({e}). Trying Testnet...")
+            logger.info(f"Error fetching klines from Mainnet for {symbol} ({e}). Trying Testnet...")
             url_testnet = f"{config.BINANCE_TESTNET_REST_URL}/api/v3/klines"
             try:
                 response = requests.get(url_testnet, params=params, timeout=10)

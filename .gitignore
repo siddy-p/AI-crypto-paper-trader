@@ -1,0 +1,25 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Environments
+venv/
+ENV/
+env/
+.env
+
+# Databases and model outputs
+*.db
+trading_system.db
+test_trading_system.db
+xgboost_model.json
+test_xgboost_model.json
+
+# IDEs and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

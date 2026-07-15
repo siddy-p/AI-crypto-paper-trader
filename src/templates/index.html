@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antigravity AI Crypto Paper Trader</title>
+    <!-- Modern Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwinds & FontAwesome CDN for rapid, premium styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <meta name="color-scheme" content="dark">
+    <script>
+        // Force dark mode
+        document.documentElement.classList.add('dark');
+    </script>
+
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', 'Outfit', sans-serif;
+            background-color: #080c14;
+            color: #f3f4f6;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.1) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.08) 0px, transparent 50%);
+            background-attachment: fixed;
+        }
+
+        /* Glassmorphism Classes */
+        .glass-card {
+            background: rgba(13, 20, 35, 0.6);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            border-radius: 16px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .glass-card:hover {
+            border-color: rgba(99, 102, 241, 0.2);
+            box-shadow: 0 12px 40px 0 rgba(99, 102, 241, 0.08);
+            transform: translateY(-2px);
+        }
+
+        .glass-card-glow {
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            box-shadow: 0 0 20px 0 rgba(99, 102, 241, 0.15);
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #080c14;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1e293b;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #334155;
+        }
+
+        .indicator-pill {
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 9999px;
+        }
+    </style>
+</head>
+<body class="min-h-screen pb-12">
+
+    <!-- Header / Navbar -->
+    <header class="border-b border-gray-800 bg-[#0b0f19]/70 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-emerald-400 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/20">
+                    <span class="text-xl">AG</span>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold tracking-tight text-white">Antigravity Trading System</h1>
+                    <p class="text-xs text-indigo-400">AI-Powered Crypto Paper Trading</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-4">
+                <span id="safety-badge" class="px-3  py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider">
+                    Loading Status...
+                </span>
+                <span class="text-xs text-gray-400 border-l border-gray-800 pl-4">
+                    Last retrained: <span id="last-retrain-time" class="font-semibold text-white">N/A</span>
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-6 mt-8 grid grid-cols-1 gap-8">
+
+        <!-- Stat Widgets Row -->
+        <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+            <!-- Portfolio Value -->
+            <div class="glass-card p-6 flex flex-col justify-between">
+                <div>
+                    <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">Portfolio Equity</span>
+                    <h3 id="stat-portfolio-value" class="text-2xl font-bold text-white mt-2">$0.00</h3>
+                </div>
+                <div class="text-xs text-gray-500 mt-4">
+                    Available: <span id="stat-available-usdt" class="font-semibold text-white">$0.00</span>
+                </div>
+            </div>
+            
+            <!-- Win Rate -->
+            <div class="glass-card p-6 flex flex-col justify-between">
+                <div>
+                    <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">Win Rate</span>
+                    <h3 id="stat-win-rate" class="text-2xl font-bold text-emerald-400 mt-2">0.0%</h3>
+                </div>
+                <div class="text-xs text-gray-500 mt-4">
+                    Total Closed: <span id="stat-total-trades" class="font-semibold text-white">0</span>
+                </div>
+            </div>
+
+            <!-- Total PnL -->
+            <div class="glass-card p-6 flex flex-col justify-between">
+                <div>
+                    <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">Total P&L</span>
+                    <h3 id="stat-total-pnl" class="text-2xl font-bold text-white mt-2">$0.00</h3>
+                </div>
+                <div class="text-xs text-gray-500 mt-4">
+                    Closed positions profit/loss
+                </div>
+            </div>
+
+            <!-- Sharpe Ratio -->
+            <div class="glass-card p-6 flex flex-col justify-between">
+                <div>
+                    <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">Sharpe Ratio</span>
+                    <h3 id="stat-sharpe-ratio" class="text-2xl font-bold text-indigo-400 mt-2">0.00</h3>
+                </div>
+                <div class="text-xs text-gray-500 mt-4">
+                    Risk-adjusted performance
+                </div>
+            </div>
+
+            <!-- Max Drawdown -->
+            <div class="glass-card p-6 flex flex-col justify-between">
+                <div>
+                    <span class="text-xs font-medium text-gray-400 uppercase tracking-wider">Max Drawdown</span>
+                    <h3 id="stat-max-drawdown" class="text-2xl font-bold text-rose-500 mt-2">0.0%</h3>
+                </div>
+                <div class="text-xs text-gray-500 mt-4">
+                    Peak-to-trough drop
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Chart & Open Positions -->
+        <section class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Equity Line Chart -->
+            <div class="glass-card p-6 lg:col-span-2">
+                <h3 class="text-sm font-semibold text-gray-300 mb-4">Portfolio Equity History</h3>
+                <div class="h-64">
+                    <canvas id="equityChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Active Positions -->
+            <div class="glass-card p-6 flex flex-col">
+                <h3 class="text-sm font-semibold text-gray-300 mb-4">Active Open Positions</h3>
+                <div id="positions-container" class="flex-1 overflow-y-auto max-h-64 flex flex-col gap-3">
+                    <!-- Dynamic open positions go here -->
+                    <div class="text-center py-8 text-gray-500 text-sm">No active open positions</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dynamic Predictions Grid -->
+        <section class="glass-card p-6">
+            <h3 class="text-sm font-semibold text-gray-300 mb-4">Top 20 USDT Pairs & Model Confidences</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 overflow-y-auto max-h-96 pr-2">
+                <div id="pairs-grid" class="contents">
+                    <!-- Monitored symbols with gauges -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Trades History -->
+        <section class="glass-card p-6">
+            <h3 class="text-sm font-semibold text-gray-300 mb-4">Execution Trade History</h3>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-left text-sm text-gray-300">
+                    <thead class="bg-gray-800/40 text-gray-400 text-xs font-semibold uppercase tracking-wider">
+                        <tr>
+                            <th class="py-3 px-4 rounded-l-lg">Time</th>
+                            <th class="py-3 px-4">Symbol</th>
+                            <th class="py-3 px-4">Side</th>
+                            <th class="py-3 px-4">Entry Price</th>
+                            <th class="py-3 px-4">Exit Price</th>
+                            <th class="py-3 px-4">Size</th>
+                            <th class="py-3 px-4">P&L (USDT)</th>
+                            <th class="py-3 px-4">Confidence</th>
+                            <th class="py-3 px-4 rounded-r-lg">Exit Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trade-history-rows" class="divide-y divide-gray-800/30">
+                        <!-- Dynamic trade rows go here -->
+                        <tr>
+                            <td colspan="9" class="py-8 text-center text-gray-500">No trading history recorded yet</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Custom Script for Page Logic -->
+    <script>
+        let equityChart = null;
+
+        // Initialize empty chart on load
+        function initChart() {
+            const ctx = document.getElementById('equityChart').getContext('2d');
+            equityChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Portfolio Equity (USDT)',
+                        data: [],
+                        borderColor: '#6366f1',
+                        backgroundColor: 'rgba(99, 102, 241, 0.05)',
+                        borderWidth: 2.5,
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 1,
+                        pointHoverRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#64748b', font: { size: 10 } }
+                        },
+                        y: {
+                            grid: { color: 'rgba(255, 255, 255, 0.03)' },
+                            ticks: { color: '#64748b', font: { size: 10 } }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Fetch portfolio history data and update the chart
+        async function updateChart() {
+            try {
+                const response = await fetch('/api/portfolio_history');
+                const data = await response.json();
+                if (data && data.length > 0) {
+                    const labels = data.map(d => d.label);
+                    const values = data.map(d => d.value);
+                    
+                    equityChart.data.labels = labels;
+                    equityChart.data.datasets[0].data = values;
+                    equityChart.update();
+                }
+            } catch (error) {
+                console.error("Error updating equity chart:", error);
+            }
+        }
+
+        // Fetch latest system status
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateDashboardMetrics(data.metrics);
+                    updateSafetyBadge(data.safety_disabled);
+                    updateOpenPositions(data.open_positions);
+                    updateTradeHistory(data.recent_trades);
+                    updateModelPredictions(data.model_predictions);
+                    document.getElementById('last-retrain-time').innerText = data.last_retrain_date;
+                }
+            } catch (error) {
+                console.error("Error fetching system status:", error);
+            }
+        }
+
+        function updateDashboardMetrics(metrics) {
+            document.getElementById('stat-portfolio-value').innerText = `$${metrics.portfolio_value.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            document.getElementById('stat-available-usdt').innerText = `$${metrics.available_usdt.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            
+            const winRateEl = document.getElementById('stat-win-rate');
+            winRateEl.innerText = `${metrics.win_rate}%`;
+            document.getElementById('stat-total-trades').innerText = metrics.total_trades;
+            
+            const pnlEl = document.getElementById('stat-total-pnl');
+            pnlEl.innerText = `${metrics.total_pnl >= 0 ? '+' : ''}$${metrics.total_pnl.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4})}`;
+            if (metrics.total_pnl > 0) {
+                pnlEl.className = "text-2xl font-bold text-emerald-400 mt-2";
+            } else if (metrics.total_pnl < 0) {
+                pnlEl.className = "text-2xl font-bold text-rose-500 mt-2";
+            } else {
+                pnlEl.className = "text-2xl font-bold text-white mt-2";
+            }
+            
+            document.getElementById('stat-sharpe-ratio').innerText = metrics.sharpe_ratio.toFixed(2);
+            document.getElementById('stat-max-drawdown').innerText = `${metrics.max_drawdown.toFixed(2)}%`;
+        }
+
+        function updateSafetyBadge(disabled) {
+            const badge = document.getElementById('safety-badge');
+            if (disabled) {
+                badge.innerText = "Demo Run (Dry Run)";
+                badge.className = "px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/20";
+            } else {
+                badge.innerText = "Binance Testnet Live";
+                badge.className = "px-3 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-md shadow-emerald-500/5";
+            }
+        }
+
+        function updateOpenPositions(positions) {
+            const container = document.getElementById('positions-container');
+            if (!positions || positions.length === 0) {
+                container.innerHTML = `<div class="text-center py-8 text-gray-500 text-sm">No active open positions</div>`;
+                return;
+            }
+            
+            container.innerHTML = positions.map(pos => {
+                const profitColor = pos.pnl >= 0 ? 'text-emerald-400' : 'text-rose-500';
+                const sign = pos.pnl >= 0 ? '+' : '';
+                return `
+                    <div class="bg-slate-900/50 border border-gray-800/60 rounded-xl p-4 flex flex-col gap-2 relative overflow-hidden">
+                        <div class="flex items-center justify-between">
+                            <span class="font-bold text-white">${pos.symbol}</span>
+                            <span class="indicator-pill bg-indigo-500/10 text-indigo-400">BUY</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-y-1.5 text-xs text-gray-400 mt-1">
+                            <div>Qty: <span class="text-gray-200 font-medium">${pos.quantity.toFixed(6)}</span></div>
+                            <div>Entry: <span class="text-gray-200 font-medium">${pos.entry_price.toFixed(4)}</span></div>
+                            <div>Current: <span class="text-gray-200 font-medium">${pos.current_price.toFixed(4)}</span></div>
+                            <div>P&L: <span class="${profitColor} font-bold">${sign}${pos.pnl.toFixed(4)} USDT (${pos.pnl_pct}%)</span></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-[10px] text-gray-500 border-t border-slate-800/80 pt-2 mt-1">
+                            <div>SL: <span class="text-rose-500/80">${pos.stop_loss.toFixed(4)}</span></div>
+                            <div>TP: <span class="text-emerald-500/80">${pos.take_profit.toFixed(4)}</span></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function updateTradeHistory(trades) {
+            const container = document.getElementById('trade-history-rows');
+            if (!trades || trades.length === 0) {
+                container.innerHTML = `
+                    <tr>
+                        <td colspan="9" class="py-8 text-center text-gray-500">No trading history recorded yet</td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            container.innerHTML = trades.map(t => {
+                const date = new Date(t.entry_time);
+                const timeStr = date.toLocaleTimeString(undefined, {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+                const profitColor = t.pnl > 0 ? 'text-emerald-400' : (t.pnl < 0 ? 'text-rose-500' : 'text-gray-400');
+                const sign = t.pnl > 0 ? '+' : '';
+                return `
+                    <tr class="hover:bg-slate-900/20">
+                        <td class="py-3.5 px-4 font-mono text-xs text-gray-500">${timeStr}</td>
+                        <td class="py-3.5 px-4 font-bold text-white">${t.symbol}</td>
+                        <td class="py-3.5 px-4"><span class="indicator-pill bg-indigo-500/10 text-indigo-400">BUY</span></td>
+                        <td class="py-3.5 px-4 font-mono">${t.entry_price.toFixed(4)}</td>
+                        <td class="py-3.5 px-4 font-mono">${t.exit_price ? t.exit_price.toFixed(4) : '-'}</td>
+                        <td class="py-3.5 px-4 font-mono">${t.quantity.toFixed(4)}</td>
+                        <td class="py-3.5 px-4 font-mono ${profitColor} font-semibold">${t.exit_price ? sign + t.pnl.toFixed(4) : '-'}</td>
+                        <td class="py-3.5 px-4 font-mono text-gray-400">${t.confidence.toFixed(1)}%</td>
+                        <td class="py-3.5 px-4"><span class="px-2 py-0.5 text-[10px] font-semibold rounded bg-slate-800 text-gray-400 uppercase tracking-wider">${t.exit_reason || '-'}</span></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function updateModelPredictions(predictions) {
+            const container = document.getElementById('pairs-grid');
+            if (!predictions || predictions.length === 0) {
+                container.innerHTML = ``;
+                return;
+            }
+            
+            container.innerHTML = predictions.map(pred => {
+                let badgeClass = "bg-rose-500/10 text-rose-500 border border-rose-500/20";
+                if (pred.confidence > 75) {
+                    badgeClass = "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold glass-card-glow";
+                } else if (pred.confidence > 50) {
+                    badgeClass = "bg-amber-500/10 text-amber-400 border border-amber-500/20";
+                }
+                
+                return `
+                    <div class="bg-slate-900/40 border border-gray-800/40 rounded-xl p-4 flex flex-col justify-between">
+                        <div class="flex items-center justify-between">
+                            <span class="font-bold text-gray-200">${pred.symbol}</span>
+                            <span class="font-mono text-xs text-gray-400">$${pred.price}</span>
+                        </div>
+                        <div class="flex items-end justify-between mt-4">
+                            <div class="text-[10px] text-gray-500 flex flex-col">
+                                <span>Vol Chg: <span class="${pred.volume_change >= 0 ? 'text-emerald-400' : 'text-rose-500'}">${pred.volume_change.toFixed(1)}%</span></span>
+                                <span>ATR: <span class="text-indigo-400">${pred.atr.toFixed(4)}</span></span>
+                            </div>
+                            <span class="indicator-pill px-2.5 py-1 ${badgeClass}">${pred.confidence.toFixed(1)}%</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Bootstrapping page calls
+        window.addEventListener('load', () => {
+            initChart();
+            fetchStatus();
+            updateChart();
+            
+            // Periodically refresh the data: status every 5 seconds, chart every 60 seconds
+            setInterval(fetchStatus, 5000);
+            setInterval(updateChart, 60000);
+        });
+    </script>
+</body>
+</html>

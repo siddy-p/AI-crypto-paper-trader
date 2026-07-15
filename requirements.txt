@@ -1,0 +1,8 @@
+requests>=2.31.0
+websocket-client>=1.7.0
+pandas>=2.2.0
+numpy>=1.26.4
+xgboost>=2.0.3
+scikit-learn>=1.4.0
+Flask>=3.0.2
+python-dotenv>=1.0.1

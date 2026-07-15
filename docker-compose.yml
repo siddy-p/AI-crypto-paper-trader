@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  trader:
+    build: .
+    container_name: ai_crypto_trader
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    volumes:
+      # Persist database and model weights
+      - trader_data:/app/data
+    env_file:
+      - .env
+    environment:
+      - DB_PATH=/app/data/trading_system.db
+      - MODEL_PATH=/app/data/xgboost_model.json
+
+volumes:
+  trader_data:

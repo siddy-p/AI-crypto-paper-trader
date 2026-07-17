@@ -160,13 +160,11 @@ class BinanceClient:
                     retry_after = int(response.headers.get("Retry-After", 60))
                     wait = retry_after + 60
                     logger.error(
-                        f"Binance 418 IP ban! Waiting {wait}s before raising. "
-                        f"Do not restart the bot until the ban expires."
+                        f"Binance 418 IP ban! Waiting {wait}s for ban to expire "
+                        f"(Retry-After={retry_after}s + 60s buffer), then retrying..."
                     )
                     time.sleep(wait)
-                    raise requests.exceptions.HTTPError(
-                        f"418 IP Ban — waited {wait}s", response=response
-                    )
+                    continue  # retry after ban expires — do NOT fall back to Testnet
 
                 response.raise_for_status()
                 return response

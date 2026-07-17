@@ -178,12 +178,11 @@ class CryptoModelManager:
             # 1. Train Long Model with class-imbalance correction
             logger.info("Training Long model classifier...")
             X_train_l, X_val_l, y_train_l, y_val_l = train_test_split(X, y_long, test_size=0.2, random_state=42)
-            # scale_pos_weight balances the minority positive (signal) class
             neg_l = int((y_train_l == 0).sum())
             pos_l = int((y_train_l == 1).sum())
             spw_l = max(1.0, neg_l / pos_l) if pos_l > 0 else 1.0
             logger.info(f"Long class balance: {neg_l} neg / {pos_l} pos — scale_pos_weight={spw_l:.1f}")
-            self.model_long = xgb.XGBClassifier(
+            model_long_temp = xgb.XGBClassifier(
                 n_estimators=400,
                 max_depth=6,
                 learning_rate=0.03,
@@ -195,10 +194,11 @@ class CryptoModelManager:
                 eval_metric='logloss',
                 early_stopping_rounds=30
             )
-            self.model_long.fit(X_train_l, y_train_l, eval_set=[(X_val_l, y_val_l)], verbose=False)
-            val_preds_l = self.model_long.predict(X_val_l)
+            model_long_temp.fit(X_train_l, y_train_l, eval_set=[(X_val_l, y_val_l)], verbose=False)
+            val_preds_l = model_long_temp.predict(X_val_l)
             acc_l = (val_preds_l == y_val_l).mean()
             logger.info(f"Long model complete. Validation Accuracy: {round(acc_l * 100, 2)}%")
+            self.model_long = model_long_temp
             
             # 2. Train Short Model with class-imbalance correction
             logger.info("Training Short model classifier...")
@@ -207,7 +207,7 @@ class CryptoModelManager:
             pos_s = int((y_train_s == 1).sum())
             spw_s = max(1.0, neg_s / pos_s) if pos_s > 0 else 1.0
             logger.info(f"Short class balance: {neg_s} neg / {pos_s} pos — scale_pos_weight={spw_s:.1f}")
-            self.model_short = xgb.XGBClassifier(
+            model_short_temp = xgb.XGBClassifier(
                 n_estimators=400,
                 max_depth=6,
                 learning_rate=0.03,
@@ -219,10 +219,11 @@ class CryptoModelManager:
                 eval_metric='logloss',
                 early_stopping_rounds=30
             )
-            self.model_short.fit(X_train_s, y_train_s, eval_set=[(X_val_s, y_val_s)], verbose=False)
-            val_preds_s = self.model_short.predict(X_val_s)
+            model_short_temp.fit(X_train_s, y_train_s, eval_set=[(X_val_s, y_val_s)], verbose=False)
+            val_preds_s = model_short_temp.predict(X_val_s)
             acc_s = (val_preds_s == y_val_s).mean()
             logger.info(f"Short model complete. Validation Accuracy: {round(acc_s * 100, 2)}%")
+            self.model_short = model_short_temp
             
             self.save_model()
             return True

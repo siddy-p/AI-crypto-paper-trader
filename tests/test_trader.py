@@ -43,9 +43,7 @@ class TestTrader(unittest.TestCase):
 
     def test_position_sizing_risk(self):
         # Starting portfolio value: $10,000
-        # Risk 1% = $100
-        # Stop loss 1% = Position size should be $10,000
-        # Cap at 98% of available USDT cash = $9,800
+        # Position size: Fixed $100
         
         portfolio_val = self.trader.get_portfolio_value()
         available_usdt = self.trader.get_available_usdt()
@@ -59,11 +57,11 @@ class TestTrader(unittest.TestCase):
         open_trades = database.get_open_trades()
         self.assertEqual(len(open_trades), 1)
         
-        # Available USDT should be: 10000 - 9800 = 200
-        self.assertAlmostEqual(self.trader.simulated_usdt, 200.0)
+        # Available USDT should be: 10000 - 100 = 9900
+        self.assertAlmostEqual(self.trader.simulated_usdt, 9900.0)
         
-        # Quantity bought: 9800 / 60000 = 0.163333
-        self.assertAlmostEqual(open_trades[0]["quantity"], 9800.0 / 60000.0)
+        # Quantity bought: 100 / 60000
+        self.assertAlmostEqual(open_trades[0]["quantity"], 100.0 / 60000.0)
 
     def test_stop_loss_hit(self):
         # Open simulated position at 100.0. SL is 1% down = 99.0

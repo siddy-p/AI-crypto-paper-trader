@@ -266,8 +266,8 @@ class Trader:
         portfolio_val = self.get_portfolio_value()
         available_usdt = self.get_available_usdt()
         
-        # Position sizing
-        usdt_position_size = portfolio_val * self.risk_pct / self.stop_loss_pct
+        # Position sizing: Fixed $100.0 per trade
+        usdt_position_size = 100.0
         usdt_to_spend = min(usdt_position_size, available_usdt * 0.98)
         
         if usdt_to_spend < 10.0:
@@ -306,10 +306,8 @@ class Trader:
         portfolio_val = self.get_portfolio_value()
         available_usdt = self.get_available_usdt()
         
-        # Position sizing: Risk 1% of portfolio value per trade.
-        # Loss amount on stop loss hit: Risk Amount = Portfolio Value * 0.01.
-        # Since Stop Loss is 1%, USDT position size = Risk Amount / 0.01 = Portfolio Value.
-        usdt_position_size = portfolio_val * self.risk_pct / self.stop_loss_pct
+        # Position sizing: Fixed $100.0 per trade.
+        usdt_position_size = 100.0
         
         # Capping position size to 98% of available USDT cash (allowing 2% fee buffer)
         usdt_to_spend = min(usdt_position_size, available_usdt * 0.98)

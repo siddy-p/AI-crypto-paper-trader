@@ -245,7 +245,9 @@
 
         <!-- Dynamic Predictions Grid -->
         <section class="glass-card p-6">
-            <h3 class="text-sm font-semibold text-gray-300 mb-4">Top 20 USDT Pairs & Model Confidences</h3>
+            <h3 class="text-sm font-semibold text-gray-300 mb-4">
+                Live Predictions & Confidences (<span id="tracked-symbols-count" class="text-indigo-400 font-bold">0</span> Pairs)
+            </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 overflow-y-auto max-h-96 pr-2">
                 <div id="pairs-grid" class="contents">
                     <!-- Monitored symbols with gauges -->
@@ -521,6 +523,7 @@
         }
 
         function updateModelPredictions(predictions) {
+            document.getElementById('tracked-symbols-count').innerText = predictions.length;
             const container = document.getElementById('pairs-grid');
             if (!predictions || predictions.length === 0) {
                 container.innerHTML = ``;

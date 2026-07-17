@@ -34,10 +34,10 @@ DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "5001"))
 DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "0.0.0.0")
 
 # Initial balance for local simulation if Binance Testnet is disabled or credentials missing
-INITIAL_USDT_BALANCE = float(os.getenv("INITIAL_USDT_BALANCE", "10000.0"))
+INITIAL_USDT_BALANCE = float(os.getenv("INITIAL_USDT_BALANCE", "1000.0"))
 
 # PostgreSQL Database URL
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 # Maximum number of symbols to fetch and track dynamically
-MAX_SYMBOLS = int(os.getenv("MAX_SYMBOLS", "20"))
+MAX_SYMBOLS = int(os.getenv("MAX_SYMBOLS", "200"))

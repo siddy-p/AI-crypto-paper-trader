@@ -19,12 +19,46 @@ class BinanceClient:
         self.ws_thread = None
         self.is_connected = False
         
-        # Safe fallback list of top 20 USDT pairs
+        # Safe fallback list of top 200 USDT pairs by volume (used when Mainnet 24hr ticker is rate-limited)
         self.fallback_pairs = [
             "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
             "ADAUSDT", "DOGEUSDT", "SHIBUSDT", "AVAXUSDT", "DOTUSDT",
-            "MATICUSDT", "LINKUSDT", "NEARUSDT", "LTCUSDT", "BCHUSDT",
-            "TRXUSDT", "ETCUSDT", "XLMUSDT", "UNIUSDT", "FILUSDT"
+            "LINKUSDT", "NEARUSDT", "LTCUSDT", "BCHUSDT", "TRXUSDT",
+            "ETCUSDT", "XLMUSDT", "UNIUSDT", "FILUSDT", "ATOMUSDT",
+            "ICPUSDT", "APTUSDT", "OPUSDT", "ARBUSDT", "INJUSDT",
+            "SUIUSDT", "SEIUSDT", "TIAUSDT", "RNDRUSDT", "LDOUSDT",
+            "IMXUSDT", "STXUSDT", "RUNEUSDT", "ORDIUSDT", "KASUSDT",
+            "WLDUSDT", "PENDLEUSDT", "PYTHUSDT", "JUPUSDT", "WIFUSDT",
+            "BONKUSDT", "PEPEUSDT", "FLOKIUSDT", "FETUSDT", "GRTUSDT",
+            "AAVEUSDT", "MKRUSDT", "SNXUSDT", "CRVUSDT", "COMPUSDT",
+            "GALAUSDT", "SANDUSDT", "MANAUSDT", "AXSUSDT", "ENJUSDT",
+            "CHZUSDT", "FLOWUSDT", "ALGOUSDT", "XTZUSDT", "EGLDUSDT",
+            "HBARUSDT", "ONEUSDT", "XMRUSDT", "ZECUSDT", "DASHUSDT",
+            "BATUSDT", "ZRXUSDT", "YFIUSDT", "SUSHIUSDT", "1INCHUSDT",
+            "CAKEUSDT", "ANKRUSDT", "CELRUSDT", "IOSTUSDT", "HOTUSDT",
+            "VETUSDT", "XVGUSDT", "ONTUSDT", "ZILUSDT", "IOTAUSDT",
+            "NEOUSDT", "WAVESUSDT", "QTUMUSDT", "ICXUSDT", "RVNUSDT",
+            "SCUSDT", "STORJUSDT", "BANDUSDT", "KNCUSDT", "BALUSDT",
+            "OCEANUSDT", "CKBUSDT", "KAVAUSDT", "CTSIUSDT", "NKNUSDT",
+            "STMXUSDT", "COTIUSDT", "BLZUSDT", "DUSKUSDT", "MTLUSDT",
+            "DOCKUSDT", "PHBUSDT", "BEAMUSDT", "HOOKUSDT", "MAGICUSDT",
+            "HIGHUSDT", "PERPUSDT", "DYDXUSDT", "GMXUSDT", "UMAUSDT",
+            "TRUUSDT", "LRCUSDT", "YFIIUSDT", "RLCUSDT", "REPUSDT",
+            "CVCUSDT", "QNTUSDT", "IDUSDT", "ARKUSDT", "AGLDUSDT",
+            "ENSUSDT", "DARUSDT", "POWRUSDT", "REQUSDT", "FUNUSDT",
+            "GLMRUSDT", "SPELLUSDT", "WOOUSDT", "FLMUSDT", "SFPUSDT",
+            "DGBUSDT", "BAKEUSDT", "TVKUSDT", "XECUSDT", "ELFUSDT",
+            "MBOXUSDT", "CFXUSDT", "ALPHAUSDT", "TORNUSDT", "CTKUSDT",
+            "RADUSDT", "HARDUSDT", "ORNUSDT", "MDTUSDT", "LITUSDT",
+            "PAXGUSDT", "RAYUSDT", "SRMUSDT", "PORTOUSDT", "JUVUSDT",
+            "PSGUSDT", "ACHUSDT", "WINGUSDT", "SUPERUSDT", "BTTCUSDT",
+            "XNOUSDT", "WRXUSDT", "TWTUSDT", "TLMUSDT", "ASTRUSDT",
+            "ROSEUSDT", "NUUSDT", "LPTUSDT", "XVSUSDT", "ATMUSDT",
+            "ASRUSDT", "ACMUSDT", "PHAUSDT", "AUDAUSDT", "BNTUSDT",
+            "MTAUSDT", "ADXUSDT", "MASKUSDT", "SXPUSDT", "KLAYUSDT",
+            "CELOUSDT", "AXLUSDT", "ALTUSDT", "JUPUSDT", "DYMUSDT",
+            "MNTUSDT", "BLURUSDT", "AIDOGEUSDT", "AGIXUSDT", "CTXCUSDT",
+            "MAVUSDT", "PENDLEUSDT", "ARKMUSDT", "CYBERUSDT", "UMAUSDT",
         ]
 
     def _get_signature(self, query_string):

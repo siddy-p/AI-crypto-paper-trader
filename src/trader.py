@@ -25,14 +25,18 @@ class Trader:
         self.last_retrain_date = None
         self.simulated_usdt = config.INITIAL_USDT_BALANCE
         
-        # Core settings
-        self.risk_pct = 0.01      # 1% risk per trade
-        self.stop_loss_pct = 0.01 # 1% SL
-        self.take_profit_pct = 0.02 # 2% TP
-        self.confidence_threshold = 75.0 # Min confidence 75%
+        # Core settings — all driven from config so they can be tuned via env vars
+        self.risk_pct             = 0.01
+        self.stop_loss_pct        = config.STOP_LOSS_PCT
+        self.take_profit_pct      = config.TAKE_PROFIT_PCT
+        self.confidence_threshold = config.CONFIDENCE_THRESHOLD
+        self.position_size_usdt   = config.POSITION_SIZE_USDT
+        self.max_open_positions   = config.MAX_OPEN_POSITIONS
         
         # Retraining scheduler state
         self.last_retrain_time = 0.0
+        self.retrain_done_today = False   # Prevents multiple retrains within the same UTC day
+        self._retrain_lock = threading.Lock()  # Prevents concurrent retrain threads
 
     def bootstrap_system(self):
         """
@@ -183,9 +187,9 @@ class Trader:
                     "volume": volume
                 })
                 
-                # Keep buffer capped to last 150 candles to maintain performance
-                if len(self.buffers[symbol]) > 150:
-                    self.buffers[symbol] = self.buffers[symbol][-150:]
+                # Keep buffer capped to last 500 candles (enough for all indicators to stabilise)
+                if len(self.buffers[symbol]) > 500:
+                    self.buffers[symbol] = self.buffers[symbol][-500:]
 
             # Perform strategy checks
             self.execute_strategy(symbol)
@@ -198,9 +202,9 @@ class Trader:
             # Check if we need to retrain daily
             self.check_daily_retrain()
 
-    def evaluate_strategy(self, symbol):
+    def execute_strategy(self, symbol):
         """Runs indicator calculations, queries the models, and executes trading actions."""
-        # 1. Build DataFrame
+        # 1. Build DataFrame from in-memory candle buffer
         with self.lock:
             candles = list(self.buffers.get(symbol, []))
             
@@ -222,6 +226,11 @@ class Trader:
         # 3. Check for Signals with Confluence Filters (Logical Trend & Momentum Verification)
         open_trades = database.get_open_trades()
         already_holding = any(t["symbol"] == symbol for t in open_trades)
+        
+        # Hard cap on concurrent open positions to control max exposure
+        if len(open_trades) >= self.max_open_positions:
+            logger.debug(f"Max open positions ({self.max_open_positions}) reached. Skipping new signal for {symbol}.")
+            return
         
         if not already_holding:
             # Extract indicator fields to verify signal confluence
@@ -266,8 +275,8 @@ class Trader:
         portfolio_val = self.get_portfolio_value()
         available_usdt = self.get_available_usdt()
         
-        # Position sizing: Fixed $100.0 per trade
-        usdt_position_size = 100.0
+        # Position sizing: Fixed USDT per trade (from config)
+        usdt_position_size = self.position_size_usdt
         usdt_to_spend = min(usdt_position_size, available_usdt * 0.98)
         
         if usdt_to_spend < 10.0:
@@ -306,8 +315,8 @@ class Trader:
         portfolio_val = self.get_portfolio_value()
         available_usdt = self.get_available_usdt()
         
-        # Position sizing: Fixed $100.0 per trade.
-        usdt_position_size = 100.0
+        # Position sizing: Fixed USDT per trade (from config)
+        usdt_position_size = self.position_size_usdt
         
         # Capping position size to 98% of available USDT cash (allowing 2% fee buffer)
         usdt_to_spend = min(usdt_position_size, available_usdt * 0.98)
@@ -405,13 +414,15 @@ class Trader:
     def close_position(self, trade_id, symbol, quantity, entry_price, exit_price, pnl, reason, side="BUY"):
         """Closes a position, places a market SELL order on Binance (or simulates), and logs the result."""
         if config.DISABLE_ORDER_EXECUTION:
-            # Simulated sell
             with self.lock:
                 if side == "SELL":
-                    # Short P&L return: entry_value + P&L = qty * (2 * entry_price - exit_price)
-                    self.simulated_usdt += quantity * (2 * entry_price - exit_price)
+                    # Short close: return the margin used (position_size) +/- P&L
+                    # When price fell (profit): entry > exit so pnl is positive
+                    # Cash back = original margin + profit, or original margin - loss
+                    margin_used = quantity * entry_price
+                    self.simulated_usdt += margin_used + pnl
                 else:
-                    # Long P&L return: quantity * exit_price
+                    # Long close: return quantity * exit_price
                     self.simulated_usdt += quantity * exit_price
                     
             database.close_trade(trade_id, exit_price, pnl, reason)
@@ -433,12 +444,27 @@ class Trader:
                 logger.info(f"Live Testnet position closed: sold {actual_qty:.6f} {symbol} at {actual_exit_price:.6f} (P&L: {actual_pnl:.4f})")
 
     def check_daily_retrain(self):
-        """Checks if 24 hours have passed since the last retraining, and triggers the process."""
-        current_time = time.time()
-        # Trigger retraining if 24 hours (86400 seconds) have passed
-        if current_time - self.last_retrain_time >= 86400:
-            logger.info("Daily retraining timer triggered. Preparing retraining data...")
-            threading.Thread(target=self.run_daily_retrain_job).start()
+        """
+        Triggers model retraining once per day at 02:00–02:05 UTC.
+        02:00 UTC is the globally lowest crypto volume window:
+          - Asian session winding down, US session not yet open.
+          - Cleanest, least-noisy training data.
+        Uses a per-day flag so only one retrain fires even across hundreds of candle closes.
+        """
+        now_utc = datetime.datetime.utcnow()
+        
+        # Reset the daily flag at 01:59 UTC so the window is fresh each day
+        if now_utc.hour == 1 and now_utc.minute == 59:
+            self.retrain_done_today = False
+        
+        # Fire in the 02:00–02:05 UTC window, but only once per day
+        in_window = (now_utc.hour == 2 and now_utc.minute < 5)
+        if in_window and not self.retrain_done_today:
+            with self._retrain_lock:
+                if not self.retrain_done_today:  # Double-checked locking
+                    self.retrain_done_today = True
+                    logger.info("Scheduled 02:00 UTC daily retrain triggered (low-volume window).")
+                    threading.Thread(target=self.run_daily_retrain_job, daemon=True).start()
 
     def run_daily_retrain_job(self):
         """Background job to download the latest candles, insert them, and retrain the model."""
@@ -468,9 +494,10 @@ class Trader:
                 self.last_retrain_date = datetime.date.today()
                 # Log daily performance report
                 database.generate_daily_report(datetime.date.today().isoformat())
-                logger.info("Daily model retraining successfully completed and performance report generated.")
+                logger.info("02:00 UTC retrain complete. Performance report generated.")
             else:
-                logger.error("Daily model retraining failed.")
+                logger.error("Daily model retraining failed. Will retry tomorrow at 02:00 UTC.")
+                self.retrain_done_today = False  # Allow retry next window if training failed
         except Exception as e:
             logger.error(f"Failed to execute daily model retraining: {e}")
 

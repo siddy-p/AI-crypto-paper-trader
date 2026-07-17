@@ -19,7 +19,7 @@ class CryptoModelManager:
         self.model_long = None
         self.model_short = None
         
-        # Define the feature list expected by the models
+        # All 17 normalized features the models are trained on
         self.feature_cols = [
             'feat_close_to_ema20',
             'feat_close_to_ema50',
@@ -34,7 +34,10 @@ class CryptoModelManager:
             'feat_volume_change',
             'feat_momentum_5',
             'feat_momentum_15',
-            'feat_momentum_30'
+            'feat_momentum_30',
+            'feat_stoch_rsi_k',
+            'feat_stoch_rsi_d',
+            'feat_obv_norm',
         ]
         
         # Load models if they exist
@@ -172,17 +175,24 @@ class CryptoModelManager:
             return False
             
         try:
-            # 1. Train Long Model
+            # 1. Train Long Model with class-imbalance correction
             logger.info("Training Long model classifier...")
             X_train_l, X_val_l, y_train_l, y_val_l = train_test_split(X, y_long, test_size=0.2, random_state=42)
+            # scale_pos_weight balances the minority positive (signal) class
+            neg_l = int((y_train_l == 0).sum())
+            pos_l = int((y_train_l == 1).sum())
+            spw_l = max(1.0, neg_l / pos_l) if pos_l > 0 else 1.0
+            logger.info(f"Long class balance: {neg_l} neg / {pos_l} pos — scale_pos_weight={spw_l:.1f}")
             self.model_long = xgb.XGBClassifier(
-                n_estimators=300,
-                max_depth=5,
-                learning_rate=0.05,
+                n_estimators=400,
+                max_depth=6,
+                learning_rate=0.03,
                 subsample=0.8,
                 colsample_bytree=0.8,
+                scale_pos_weight=spw_l,
+                tree_method='hist',
                 random_state=42,
-                eval_metric="logloss",
+                eval_metric='logloss',
                 early_stopping_rounds=30
             )
             self.model_long.fit(X_train_l, y_train_l, eval_set=[(X_val_l, y_val_l)], verbose=False)
@@ -190,17 +200,23 @@ class CryptoModelManager:
             acc_l = (val_preds_l == y_val_l).mean()
             logger.info(f"Long model complete. Validation Accuracy: {round(acc_l * 100, 2)}%")
             
-            # 2. Train Short Model
+            # 2. Train Short Model with class-imbalance correction
             logger.info("Training Short model classifier...")
             X_train_s, X_val_s, y_train_s, y_val_s = train_test_split(X, y_short, test_size=0.2, random_state=42)
+            neg_s = int((y_train_s == 0).sum())
+            pos_s = int((y_train_s == 1).sum())
+            spw_s = max(1.0, neg_s / pos_s) if pos_s > 0 else 1.0
+            logger.info(f"Short class balance: {neg_s} neg / {pos_s} pos — scale_pos_weight={spw_s:.1f}")
             self.model_short = xgb.XGBClassifier(
-                n_estimators=300,
-                max_depth=5,
-                learning_rate=0.05,
+                n_estimators=400,
+                max_depth=6,
+                learning_rate=0.03,
                 subsample=0.8,
                 colsample_bytree=0.8,
+                scale_pos_weight=spw_s,
+                tree_method='hist',
                 random_state=42,
-                eval_metric="logloss",
+                eval_metric='logloss',
                 early_stopping_rounds=30
             )
             self.model_short.fit(X_train_s, y_train_s, eval_set=[(X_val_s, y_val_s)], verbose=False)

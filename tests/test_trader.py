@@ -20,6 +20,11 @@ class TestTrader(unittest.TestCase):
         # Configure Trader with order execution disabled (default safe simulation)
         config.DISABLE_ORDER_EXECUTION = True
         config.INITIAL_USDT_BALANCE = 10000.0
+        config.POSITION_SIZE_USDT   = 100.0
+        config.STOP_LOSS_PCT        = 0.015
+        config.TAKE_PROFIT_PCT      = 0.030
+        config.CONFIDENCE_THRESHOLD = 60.0
+        config.MAX_OPEN_POSITIONS   = 5
         
         self.trader = Trader(self.mock_client, self.mock_model_manager)
         self.trader.symbols = ["BTCUSDT", "ETHUSDT"]

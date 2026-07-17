@@ -202,10 +202,10 @@ class BinanceClient:
 
     # WebSocket streams
     def start_websocket_stream(self, symbols, on_candle_update_callback):
-        """Starts a background WebSocket connection for multiple symbol streams."""
-        # Format streams: e.g. btcusdt@kline_1m/ethusdt@kline_1m/...
+        """Starts a background WebSocket on Binance MAINNET for real volume/tick data."""
+        # Mainnet stream URL — real market data with actual volume
         streams = "/".join([f"{s.lower()}@kline_1m" for s in symbols])
-        ws_url = f"{config.BINANCE_TESTNET_STREAM_URL}?streams={streams}"
+        ws_url = f"wss://stream.binance.com:9443/stream?streams={streams}"
         
         def on_message(ws, message):
             try:
@@ -254,10 +254,11 @@ class BinanceClient:
         self.ws_thread.daemon = True
         self.ws_thread.start()
 
-    def _reconnect(self, symbols, callback, delay=5):
-        """Attempts to reconnect to WebSockets after a network loss."""
+    def _reconnect(self, symbols, callback, attempt=1):
+        """Exponential backoff reconnect: 5s, 10s, 20s, 40s, capped at 60s."""
+        delay = min(5 * (2 ** (attempt - 1)), 60)
+        logger.warning(f"WebSocket reconnect attempt #{attempt} in {delay}s...")
         time.sleep(delay)
-        logger.info("Attempting WebSocket reconnection...")
         self.start_websocket_stream(symbols, callback)
 
     def stop_websocket_stream(self):

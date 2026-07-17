@@ -63,25 +63,29 @@ class TestModel(unittest.TestCase):
         # Setup mock indicators dataframe
         size = 65
         df = pd.DataFrame({
-            'open': np.random.uniform(90, 110, size),
-            'high': np.random.uniform(90, 110, size),
-            'low': np.random.uniform(90, 110, size),
+            'open':  np.random.uniform(90, 110, size),
+            'high':  np.random.uniform(90, 110, size),
+            'low':   np.random.uniform(90, 110, size),
             'close': np.random.uniform(90, 110, size),
             'volume': np.random.uniform(100, 1000, size),
             'ema_20': np.random.uniform(90, 110, size),
             'ema_50': np.random.uniform(90, 110, size),
             'rsi_14': np.random.uniform(20, 80, size),
-            'macd_line': np.random.uniform(-1, 1, size),
+            'macd_line':   np.random.uniform(-1, 1, size),
             'macd_signal': np.random.uniform(-1, 1, size),
-            'macd_hist': np.random.uniform(-1, 1, size),
+            'macd_hist':   np.random.uniform(-1, 1, size),
             'bb_middle': np.random.uniform(90, 110, size),
-            'bb_upper': np.random.uniform(100, 120, size),
-            'bb_lower': np.random.uniform(80, 100, size),
+            'bb_upper':  np.random.uniform(100, 120, size),
+            'bb_lower':  np.random.uniform(80, 100, size),
             'volume_change_pct': np.random.uniform(-50, 200, size),
-            'atr_14': np.random.uniform(0.1, 2.0, size),
-            'momentum_5': np.random.uniform(-2, 2, size),
+            'atr_14':      np.random.uniform(0.1, 2.0, size),
+            'momentum_5':  np.random.uniform(-2, 2, size),
             'momentum_15': np.random.uniform(-4, 4, size),
-            'momentum_30': np.random.uniform(-6, 6, size)
+            'momentum_30': np.random.uniform(-6, 6, size),
+            # New indicators added in overhaul
+            'stoch_rsi_k': np.random.uniform(0, 100, size),
+            'stoch_rsi_d': np.random.uniform(0, 100, size),
+            'obv':         np.cumsum(np.random.uniform(-1000, 1000, size)),
         })
         
         # Predict should return a default 0.5 if no model is loaded

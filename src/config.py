@@ -41,3 +41,10 @@ DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 # Maximum number of symbols to fetch and track dynamically
 MAX_SYMBOLS = int(os.getenv("MAX_SYMBOLS", "200"))
+
+# Trading risk parameters (all tunable via Render environment variables)
+POSITION_SIZE_USDT   = float(os.getenv("POSITION_SIZE_USDT",   "100.0"))  # Fixed USDT per trade
+MAX_OPEN_POSITIONS   = int(os.getenv("MAX_OPEN_POSITIONS",   "5"))        # Max simultaneous open trades ($500 max exposure)
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "60.0"))   # Min model confidence to enter a trade (%)
+STOP_LOSS_PCT        = float(os.getenv("STOP_LOSS_PCT",        "0.015"))   # 1.5% SL
+TAKE_PROFIT_PCT      = float(os.getenv("TAKE_PROFIT_PCT",      "0.030"))   # 3.0% TP (2:1 R:R ratio)

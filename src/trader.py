@@ -81,8 +81,8 @@ class Trader:
             # Populate in-memory buffers
             self.buffers[symbol] = klines
             self.latest_prices[symbol] = klines[-1]["close"]
-            
-            time.sleep(0.05) # Small rate-limit protection
+            # No sleep needed here — BinanceClient._WeightBucket throttles automatically,
+            # firing each request the instant budget is available for max throughput.
 
         # Save bootstrap candles to database
         if candles_to_save:

@@ -10,6 +10,66 @@ from src import config
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Binance public REST weight limits
+#   Hard cap  : 1200 weight / 60-second rolling window
+#   Our budget : 1100 weight / 60s  (100 weight safety buffer)
+#   klines limit=1000 → 10 weight per call
+#   klines limit=500  →  5 weight per call
+#   ticker/24hr (all) → 40 weight per call
+# ---------------------------------------------------------------------------
+
+class _WeightBucket:
+    """
+    Sliding-window weight tracker for Binance's IP-level rate limit.
+
+    Before each API call, `consume(weight)` is called:
+    - If enough budget remains in the current 60-second window, the call
+      proceeds immediately.
+    - Otherwise it sleeps for precisely the time until the oldest entry
+      falls out of the window, freeing up enough budget — then proceeds.
+
+    This gives the *maximum possible throughput* without ever exceeding
+    the limit, replacing all fixed sleeps.
+    """
+
+    WINDOW   = 60    # seconds
+    BUDGET   = 1100  # weight units per window (hard cap is 1200; 100 safety buffer)
+
+    def __init__(self):
+        self._log  = []  # list of (timestamp: float, weight: int)
+        self._lock = threading.Lock()
+
+    def consume(self, weight: int):
+        """Block until `weight` units can be spent, then record the spend."""
+        with self._lock:
+            while True:
+                now = time.monotonic()
+                # Evict entries that have rolled out of the window
+                cutoff = now - self.WINDOW
+                self._log = [(t, w) for t, w in self._log if t > cutoff]
+
+                used = sum(w for _, w in self._log)
+                if used + weight <= self.BUDGET:
+                    self._log.append((now, weight))
+                    return  # budget available — proceed immediately
+
+                # Not enough budget yet. Sleep until the oldest entry expires.
+                oldest_ts = self._log[0][0]
+                sleep_for = (oldest_ts + self.WINDOW) - now + 0.05  # 50ms padding
+                logger.debug(
+                    f"[WeightBucket] Budget {used}/{self.BUDGET} used. "
+                    f"Sleeping {sleep_for:.2f}s for window to clear..."
+                )
+                time.sleep(max(0.05, sleep_for))
+
+    @property
+    def used(self) -> int:
+        """Current weight consumed in the active window (for logging)."""
+        with self._lock:
+            now = time.monotonic()
+            return sum(w for t, w in self._log if t > now - self.WINDOW)
+
 class BinanceClient:
     def __init__(self):
         self.api_key = config.BINANCE_API_KEY
@@ -18,6 +78,9 @@ class BinanceClient:
         self.ws = None
         self.ws_thread = None
         self.is_connected = False
+
+        # Shared weight bucket — enforces Binance's 1200 weight/min limit
+        self._bucket = _WeightBucket()
         
         # Safe fallback list of top 200 USDT pairs by volume (used when Mainnet 24hr ticker is rate-limited)
         self.fallback_pairs = [
@@ -60,6 +123,65 @@ class BinanceClient:
             "MNTUSDT", "BLURUSDT", "AIDOGEUSDT", "AGIXUSDT", "CTXCUSDT",
             "MAVUSDT", "PENDLEUSDT", "ARKMUSDT", "CYBERUSDT", "UMAUSDT",
         ]
+
+    def _safe_get(self, url, params=None, weight=1, max_retries=3):
+        """
+        Rate-limit-aware GET wrapper for Binance public endpoints.
+
+        Before making the request, consumes `weight` units from the sliding-window
+        weight bucket so we never exceed Binance's 1200 weight/min limit.
+
+        - On HTTP 429 (rate limited): reads the Retry-After header and waits.
+        - On HTTP 418 (IP banned):    waits the Retry-After duration + 60s buffer,
+          then raises so the caller can decide whether to abort or fallback.
+        - All other transient errors are retried up to max_retries times with
+          exponential backoff (2s → 4s → 8s).
+
+        Returns the requests.Response object on success, or raises on failure.
+        """
+        for attempt in range(1, max_retries + 1):
+            # Block here until we have budget — this is the main throttle mechanism.
+            self._bucket.consume(weight)
+
+            try:
+                response = requests.get(url, params=params, timeout=10)
+
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 30))
+                    wait = retry_after + 5
+                    logger.warning(
+                        f"Binance 429 rate limit (attempt {attempt}/{max_retries}). "
+                        f"Waiting {wait}s (Retry-After={retry_after}s)..."
+                    )
+                    time.sleep(wait)
+                    continue  # retry — bucket.consume will fire again next loop
+
+                if response.status_code == 418:
+                    retry_after = int(response.headers.get("Retry-After", 60))
+                    wait = retry_after + 60
+                    logger.error(
+                        f"Binance 418 IP ban! Waiting {wait}s before raising. "
+                        f"Do not restart the bot until the ban expires."
+                    )
+                    time.sleep(wait)
+                    raise requests.exceptions.HTTPError(
+                        f"418 IP Ban — waited {wait}s", response=response
+                    )
+
+                response.raise_for_status()
+                return response
+
+            except requests.exceptions.HTTPError:
+                raise  # propagate HTTP errors immediately
+            except Exception as e:
+                backoff = 2 ** attempt  # 2s, 4s, 8s
+                logger.warning(
+                    f"Request to {url} failed (attempt {attempt}/{max_retries}): {e}. "
+                    f"Retrying in {backoff}s..."
+                )
+                if attempt == max_retries:
+                    raise
+                time.sleep(backoff)
 
     def _get_signature(self, query_string):
         return hmac.new(
@@ -113,8 +235,8 @@ class BinanceClient:
         try:
             # We use Mainnet for volume rankings since Testnet volume data is sparse
             url = f"{config.BINANCE_MAINNET_REST_URL}/api/v3/ticker/24hr"
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
+            # ticker/24hr with no symbol filter costs 40 weight
+            response = self._safe_get(url, weight=40)
             tickers = response.json()
             
             # Filter for USDT pairs, sort by quoteVolume descending
@@ -142,22 +264,20 @@ class BinanceClient:
         if start_time:
             params["startTime"] = start_time
             
-        # Try Mainnet first
+        # Weight cost: limit=1000 → 10, limit=500 → 5, anything else → ceil(limit/100)
+        kline_weight = max(1, (limit + 99) // 100)
+
+        # Try Mainnet first (weight bucket ensures we never exceed 1100 weight/min)
         url_mainnet = f"{config.BINANCE_MAINNET_REST_URL}/api/v3/klines"
         try:
-            response = requests.get(url_mainnet, params=params, timeout=10)
-            if response.status_code in (418, 429):
-                logger.info(f"Mainnet API returned {response.status_code} for {symbol}. Falling back to Testnet...")
-                raise requests.exceptions.RequestException(f"Rate limited or teapot: {response.status_code}")
-            response.raise_for_status()
+            response = self._safe_get(url_mainnet, params=params, weight=kline_weight)
             klines = response.json()
         except Exception as e:
             # Fallback to Testnet REST API
             logger.info(f"Error fetching klines from Mainnet for {symbol} ({e}). Trying Testnet...")
             url_testnet = f"{config.BINANCE_TESTNET_REST_URL}/api/v3/klines"
             try:
-                response = requests.get(url_testnet, params=params, timeout=10)
-                response.raise_for_status()
+                response = self._safe_get(url_testnet, params=params, weight=kline_weight)
                 klines = response.json()
             except Exception as e_inner:
                 # 400 Bad Request means the token pair is not listed/supported on the Testnet API
